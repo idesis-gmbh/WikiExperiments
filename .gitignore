@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+data/*.bz2
+data/*.db
+data/*.csv

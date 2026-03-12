@@ -1,11 +1,15 @@
 [project]
 name = "wikiexperiments"
 version = "0.1.0"
-description = "Add your description here"
+description = "Experiments with Wikipedia data"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "duckdb>=1.5.0",
     "mwparserfromhell>=0.7.2",
+]
+
+[dependency-groups]
+dev = [
     "ruff>=0.15.5",
 ]
