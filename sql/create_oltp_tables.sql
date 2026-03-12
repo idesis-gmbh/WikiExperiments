@@ -16,12 +16,6 @@ CREATE TABLE internal_pages (
     UNIQUE(ns, title)
 );
 
-CREATE TABLE pagerank (
-    id INTEGER,
-    rank REAL,
-    PRIMARY KEY(id)
-);
-
 CREATE TABLE internal_links (
     source_id INTEGER,
     target_id INTEGER,

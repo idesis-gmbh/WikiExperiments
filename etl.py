@@ -1,16 +1,12 @@
 import bz2
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED, as_completed
-import cProfile
 from itertools import islice
-import pstats
+from pathlib import Path
 import sqlite3
 import time
 import xml.etree.ElementTree as ET
 import mwparserfromhell
-
-INDEX_FILE_NAME = "data/enwiki-20260301-pages-articles-multistream-index.txt.bz2"
-DATA_FILE_NAME = "data/enwiki-20260301-pages-articles-multistream.xml.bz2"
-DB_FILE_NAME = "data/wiki.db"
+from config import INDEX_FILE_NAME, DATA_FILE_NAME, OLTP_DB_FILE_NAME, MAX_WORKERS
 
 
 def extract_index(index_file_name):
@@ -116,7 +112,7 @@ def transform_data(data_file_name, offset, full):
             if redirect is not None:
                 redirection = True
                 internal_links = {(0, redirect.attrib["title"])}
-                external_links = {}
+                external_links = set()
             else:
                 redirection = False
                 code = mwparserfromhell.parse(page.find("revision").find("text").text)
@@ -146,12 +142,12 @@ def sqlite3_settings(connection):
 
 def init_data(connection, full):
     cursor = connection.cursor()
-    cursor.execute("DELETE FROM redirects", ())
-    cursor.execute("DELETE FROM external_links", ())
-    cursor.execute("DELETE FROM external_pages", ())
-    cursor.execute("DELETE FROM internal_links", ())
+    cursor.execute("DELETE FROM redirects")
+    cursor.execute("DELETE FROM external_links")
+    cursor.execute("DELETE FROM external_pages")
+    cursor.execute("DELETE FROM internal_links")
     if full:
-        cursor.execute("DELETE FROM internal_pages", ())
+        cursor.execute("DELETE FROM internal_pages")
     connection.commit()
 
 
@@ -202,25 +198,27 @@ def load_data(connection, generator, step):
 def run_serial_etl_data(step, slices=None):
     index_file_name = INDEX_FILE_NAME
     data_file_name = DATA_FILE_NAME
-    with sqlite3.connect(DB_FILE_NAME) as connection:
+    with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
         sqlite3_settings(connection)
+        # NOTE: when developing you can remove old database contents here
         # init_data(connection)
         for offset, pages in (
             islice(transform_index(index_file_name), slices)
             if slices
             else transform_index(index_file_name)
         ):
-            print(offset)
+            # print("Processing strean at offset", offset)
             load_data(
                 connection, transform_data(data_file_name, offset, step == 2), step
             )
 
 
-def run_parallel_etl_data(step, slices=None, max_workers=4):
+def run_parallel_etl_data(step, slices=None, max_workers=MAX_WORKERS):
     index_file_name = INDEX_FILE_NAME
     data_file_name = DATA_FILE_NAME
-    with sqlite3.connect(DB_FILE_NAME) as connection:
+    with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
         sqlite3_settings(connection)
+        # NOTE: when developing you can remove old database contents here
         # init_data(connection)
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             futures = set()
@@ -229,7 +227,7 @@ def run_parallel_etl_data(step, slices=None, max_workers=4):
                 if slices
                 else transform_index(index_file_name)
             ):
-                print(offset)
+                # print("Processing strean at offset", offset)
                 futures.add(
                     executor.submit(
                         transform_data_list, data_file_name, offset, step == 2
@@ -243,27 +241,30 @@ def run_parallel_etl_data(step, slices=None, max_workers=4):
                 load_data(connection, future.result(), step)
 
 
+def init_schema():
+    if Path(OLTP_DB_FILE_NAME).exists():
+        print(f"Database {OLTP_DB_FILE_NAME} already exists, skipping schema init.")
+        return
+    with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
+        for file_name in ["sql/create_oltp_tables.sql", "sql/create_oltp_indices.sql"]:
+            with open(file_name) as file:
+                connection.executescript(file.read())
+
+
+def run(max_workers=MAX_WORKERS):
+    start = time.time()
+    init_schema()
+    end = time.time()
+    print(f"Initialized schema: {end - start:.2f} seconds")
+    start = time.time()
+    run_parallel_etl_data(1, max_workers=max_workers)
+    end = time.time()
+    print(f"ETL step 1: {end - start:.2f} seconds")
+    start = time.time()
+    run_parallel_etl_data(2, max_workers=max_workers)
+    end = time.time()
+    print(f"ETL step 2: {end - start:.2f} seconds")
+
+
 if __name__ == "__main__":
-    start = time.time()
-    # run_serial_etl_data(1, slices=2)
-    # run_serial_etl_data(1)
-    # run_serial_etl_data(2, slices=2)
-    # run_serial_etl_data(2)
-    # run_parallel_etl_data(1, max_workers=8)
-    run_parallel_etl_data(2, max_workers=8)
-    end = time.time()
-    print(f"{end - start:.2f} seconds")
-    """
-    cProfile.run("run_serial_etl_data(2, slices=2)", "profile_results")
-    p = pstats.Stats("profile_results")
-    p.strip_dirs().sort_stats("cumulative").print_stats(20)
-    start = time.time()
-    run_serial_etl_data(1, slices=16)
-    end = time.time()
-    print(f"{end - start:.2f} seconds")
-    for max_workers in [2, 4, 8]:
-        start = time.time()
-        run_parallel_etl_data(1, slices=16, max_workers=max_workers)
-        end = time.time()
-        print(f"{end - start:.2f} seconds")
-    """
+    run()

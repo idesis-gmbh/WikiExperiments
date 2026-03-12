@@ -1,28 +1,30 @@
+import csv
+from pathlib import Path
 import sqlite3
 import time
 import duckdb
+from config import WIKI_NAME, OLTP_DB_FILE_NAME, OLAP_DB_FILE_NAME
+
+DAMPING_FACTOR = 0.85
+MAX_ITERATIONS = 50
+CONVERGENCE_DELTA = 1e-6
 
 
 def dump(connection, debug=False):
+    """Debug utility"""
     cursor = connection.cursor()
 
     if debug:
-        result = cursor.execute(
-            """
-select * from internal_pages;
-""",
-            (),
-        )
+        result = cursor.execute("""
+            select * from internal_pages;
+        """)
         for row in result.fetchall():
             print(row)
 
-    result = cursor.execute(
-        """
-select sum(rank1), sum(rank2) 
-from internal_pages;
-""",
-        (),
-    )
+    result = cursor.execute("""
+        select sum(rank1), sum(rank2) 
+        from internal_pages;
+    """)
     for row in result.fetchall():
         print(row)
 
@@ -30,119 +32,140 @@ from internal_pages;
 def page_rank(connection):
     cursor = connection.cursor()
 
-    cursor.execute(
-        """
-UPDATE internal_pages
-SET out_degree = (
-    SELECT COUNT(*)
-    FROM internal_links
-    WHERE internal_links.source_id = internal_pages.id
-), rank1 = 1.0 / (
-    SELECT COUNT(*) 
-    FROM internal_pages 		
-)
-""",
-        (),
-    )
+    cursor.execute("""
+        UPDATE internal_pages
+        SET out_degree = (
+            SELECT COUNT(*)
+            FROM internal_links
+            WHERE internal_links.source_id = internal_pages.id
+        ), rank1 = 1.0 / (
+            SELECT COUNT(*) 
+            FROM internal_pages 		
+        )
+    """)
 
-    for index in range(50):
+    for index in range(MAX_ITERATIONS):
         if index == 0:
             rank1, rank2 = "rank1", "rank2"
         else:
             rank1, rank2 = rank2, rank1
-        start = time.time()
 
-        print("iteration", index, "step 1")
+        print("Pagerank iteration", index)
 
-        cursor.execute(
-            f"""
-UPDATE internal_pages
-SET {rank2} = 0.0
-""",
-            (),
-        )
+        cursor.execute(f"""
+            UPDATE internal_pages
+            SET {rank2} = 0.0
+        """)
 
-        print("iteration", index, "step 2")
-
-        cursor.execute(
-            f"""
-WITH connected_page_ranks AS (
-	SELECT target_id, SUM({rank1} / out_degree) AS rank 
-	FROM internal_pages
-    INNER JOIN internal_links ON source_id = id
-    GROUP BY target_id
-)
-UPDATE internal_pages 
-SET {rank2} = internal_pages.{rank2} + connected_page_ranks.rank
-FROM connected_page_ranks
-WHERE internal_pages.id = connected_page_ranks.target_id;
-""",
-            (),
-        )
-
-        print("iteration", index, "step 3")
-
-        cursor.execute(
-            f"""
-WITH disconnected_page_ranks AS (
-	SELECT (1.0 - sum({rank2})) / COUNT(*) AS rank
-	FROM internal_pages
-)
-UPDATE internal_pages
-SET {rank2} = internal_pages.{rank2} + disconnected_page_ranks.rank
-FROM disconnected_page_ranks
-""",
-            (),
-        )
-
-        print("iteration", index, "step 4")
-
-        cursor.execute(
-            f"""
-UPDATE internal_pages
-SET {rank2} = .15 / (SELECT COUNT(*) FROM internal_pages) + 
-              .85 * ({rank2})
-""",
-            (),
-        )
-
-        print("iteration", index, "step 5")
-
-        result = cursor.execute(
-            f"""
-SELECT MAX(ABS({rank1} - {rank2})) AS max_delta
-FROM internal_pages
-""",
-            (),
-        )
-        max_delta = result.fetchone()[0]
-        print("delta", max_delta)
-        end = time.time()
-        print(f"{end - start:.2f} seconds")
-        if max_delta < 1e-6:
-            cursor.execute(
-                f"""
-UPDATE internal_pages
-SET {rank1} = {rank2}
-""",
-                (),
+        cursor.execute(f"""
+            WITH connected_page_ranks AS (
+                SELECT target_id, SUM({rank1} / out_degree) AS rank 
+                FROM internal_pages
+                INNER JOIN internal_links ON source_id = id
+                GROUP BY target_id
             )
+            UPDATE internal_pages 
+            SET {rank2} = internal_pages.{rank2} + connected_page_ranks.rank
+            FROM connected_page_ranks
+            WHERE internal_pages.id = connected_page_ranks.target_id;
+        """)
+
+        cursor.execute(f"""
+            WITH disconnected_page_ranks AS (
+                SELECT (1.0 - sum({rank2})) / COUNT(*) AS rank
+                FROM internal_pages
+            )
+            UPDATE internal_pages
+            SET {rank2} = internal_pages.{rank2} + disconnected_page_ranks.rank
+            FROM disconnected_page_ranks
+        """)
+
+        cursor.execute(f"""
+            UPDATE internal_pages
+            SET {rank2} =  {1.0 - DAMPING_FACTOR} / (SELECT COUNT(*) FROM internal_pages) + 
+                        {DAMPING_FACTOR} * ({rank2})
+        """)
+
+        result = cursor.execute(f"""
+            SELECT MAX(ABS({rank1} - {rank2})) AS max_delta
+            FROM internal_pages
+        """)
+        max_delta = result.fetchone()[0]
+        print(f"Delta {max_delta}")
+        if max_delta < CONVERGENCE_DELTA:
+            cursor.execute(f"""
+                UPDATE internal_pages
+                SET {rank1} = {rank2}
+            """)
             break
 
         connection.commit()
 
 
-def run_page_rank_oltp(db_file_name):
-    with sqlite3.connect(db_file_name) as connection:
+def run_page_rank_oltp():
+    start = time.time()
+    with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
         page_rank(connection)
+    end = time.time()
+    print(f"Pagerank computed: {end - start:.2f} seconds")
 
 
-def run_page_rank_olap(db_file_name):
-    with duckdb.connect(db_file_name) as connection:
+def create_olap_db(oltp_db_file_name, olap_db_file_name):
+    with duckdb.connect(olap_db_file_name) as connection:
+        connection.execute(f"""
+            ATTACH '{oltp_db_file_name}' AS sqlite_db (TYPE SQLITE)
+        """)
+        connection.execute("""
+            CREATE OR REPLACE TABLE internal_pages AS 
+            SELECT * FROM sqlite_db.internal_pages
+        """)
+        connection.execute("""
+            CREATE OR REPLACE TABLE internal_links AS 
+            SELECT * FROM sqlite_db.internal_links
+        """)
+        connection.execute("DETACH sqlite_db")
+
+
+def transfer_results(oltp_db_file_name, olap_db_file_name):
+    csv_file = Path(oltp_db_file_name).parent / f"{WIKI_NAME}-ranks.csv"
+
+    # Export from DuckDB to CSV
+    with duckdb.connect(olap_db_file_name) as connection:
+        connection.execute(f"""
+            COPY (SELECT id, rank1, rank2 FROM internal_pages) 
+            TO '{csv_file}' (FORMAT CSV, HEADER true)
+        """)
+
+    # Bulk import into SQLite
+    with sqlite3.connect(oltp_db_file_name) as connection:
+        connection.execute("""
+            CREATE TEMP TABLE ranks_temporary 
+            (id INTEGER, rank1 REAL, rank2 REAL)
+        """)
+        connection.executemany(
+            "INSERT INTO ranks_temporary VALUES (?, ?, ?)", csv.reader(open(csv_file))
+        )
+        connection.execute("""
+            UPDATE internal_pages 
+            SET rank1 = temporary.rank1, rank2 = temporary.rank2
+            FROM ranks_temporary temporary
+            WHERE internal_pages.id = t.id
+        """)
+
+
+def run_page_rank_olap():
+    start = time.time()
+    create_olap_db(OLTP_DB_FILE_NAME, OLAP_DB_FILE_NAME)
+    with duckdb.connect(OLAP_DB_FILE_NAME) as connection:
         page_rank(connection)
+    end = time.time()
+    print(f"Pagerank computed: {end - start:.2f} seconds")
+
+
+def run():
+    # run_page_rank_oltp()
+    run_page_rank_olap()
 
 
 if __name__ == "__main__":
-    # run_page_rank_oltp("data/test-oltp.db")
-    # run_page_rank_olap("data/test-olap.db")
-    run_page_rank_olap("data/wiki-olap.db")
+    run()
