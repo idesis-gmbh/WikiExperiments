@@ -8,7 +8,7 @@ Um das herauszufinden, haben wir PageRank auf die englische Wikipedia angewendet
 
 PageRank wurde von Larry Page und Sergey Brin entwickelt, um Webseiten nach ihrer Bedeutung zu ordnen. Die Grundidee ist elegant: Eine Seite ist wichtig, wenn viele wichtige Seiten auf sie verlinken. Bedeutung pflanzt sich durch das Netz fort – iterativ, bis sich die Werte stabilisieren.
 
-Wikipedia eignet sich hervorragend für diese Analyse. Die internen Links sind von Redakteuren gesetzt, inhaltlich bedeutsam und frei von kommerziellen Verzerrungen. Mit Millionen von Artikeln ist der Datensatz zudem groß genug, um rechnerische Entscheidungen wirklich spürbar zu machen.
+Wikipedia eignet sich hervorragend für diese Analyse. Die internen Links sind von Redakteuren gesetzt, inhaltlich bedeutsam und frei von kommerziellen Verzerrungen. Mit Millionen von Artikeln ist der Datensatz zudem groß genug, um rechnerische Entscheidungen wirklich spürbar zu machen. Die Idee ist nicht neu – [Nayuki hat einen ähnlichen Ansatz in Java umgesetzt](https://www.nayuki.io/page/computing-wikipedias-internal-pageranks), und [Thalhammer & Rettinger haben in einer akademischen Studie](https://www.uni-trier.de/fileadmin/fb2/LDV/Rettinger/publications/Wikipedia_pagerank1.pdf) untersucht, wie verschiedene Link-Typen die Rangfolge beeinflussen. Unser Ansatz unterscheidet sich vor allem durch die Wahl der Werkzeuge: reines SQL, kein externer Graph-Prozessor, und ein direkter Datenbankvergleich als explizites Ziel.
 
 ## Die Pipeline: ETL in zwei Pässen
 
@@ -46,7 +46,7 @@ Wir haben denselben Algorithmus gegen SQLite und DuckDB laufen lassen:
 | SQLite | ~510 Sekunden |
 | DuckDB | ~10 Sekunden |
 
-DuckDB ist **50-mal schneller** – bei numerisch identischen Ergebnissen. Die Datenbank ist dazu noch 20-mal kleiner, dank spaltenorientierter Speicherung und Kompression. Für die vollständige englische Wikipedia bedeutet das den Unterschied zwischen einem Lauf, der Stunden dauert, und einem, der Minuten braucht.
+DuckDB ist **50-mal schneller** – bei numerisch identischen Ergebnissen. Die Datenbank ist dazu noch 20-mal kleiner, dank spaltenorientierter Speicherung und Kompression. Für die vollständige englische Wikipedia bedeutet das den Unterschied zwischen einem Lauf, der Stunden dauert, und einem, der Minuten braucht. Das deckt sich mit dem, was unabhängige Benchmarks zeigen: [DuckDB dominiert analytische Workloads gegenüber SQLite](https://www.lukas-barth.net/blog/sqlite-duckdb-benchmark/) – der Unterschied liegt in der vektorisierten Ausführung und dem spaltenorientierten Speicherformat, das für Aggregationen über große Datenmengen optimiert ist.
 
 ## Die Ergebnisse: Was Wikipedia für wichtig hält
 
