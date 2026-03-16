@@ -6,6 +6,8 @@ import sqlite3
 import time
 import xml.etree.ElementTree as ET
 import mwparserfromhell
+import tldextract
+
 from config import INDEX_FILE_NAME, DATA_FILE_NAME, OLTP_DB_FILE_NAME, MAX_WORKERS
 
 
@@ -87,7 +89,7 @@ def get_link_ns_title(text):
         prefix, rest = text.split(":", 1)
         if prefix in NS_PREFIXES:
             ns = NS_PREFIXES[prefix]
-            title = rest
+            title = f"{prefix}:{rest}" if prefix else rest
         else:
             ns = 0
             title = text
@@ -95,6 +97,39 @@ def get_link_ns_title(text):
         ns = 0
         title = text
     return ns, title
+
+
+def get_template_ns_titles(ns, title, code):
+    for template in code.filter_templates():
+        name = (
+            str(template.name)
+            .lower()
+            .replace(" ", "")
+            .replace("-", "")
+            .replace("+", "")
+        )
+        if name in [
+            "commonscategory",
+            "commonscategoryinline",
+            "commonscategorymulti",
+            "commonscat",
+            "commonscatinline",
+            "commonscatmulti",
+            "commonscats",
+            "commonsandcategory",
+            "commonsandcategoryinline",
+        ]:
+            categories = template.params[0] if template.params else []
+            if ns != 14 and not categories:
+                categories = [title]
+            yield {(14, f"Category:{category}") for category in categories}
+        elif name.startswith("commons") and name not in [
+            "commons",
+            "commonscompact",
+            "commonsinline",
+        ]:
+            # print(title, template.name, template.params)
+            pass
 
 
 def transform_data(data_file_name, offset, full):
@@ -111,7 +146,7 @@ def transform_data(data_file_name, offset, full):
             redirect = page.find("redirect")
             if redirect is not None:
                 redirection = True
-                internal_links = {(0, redirect.attrib["title"])}
+                internal_links = {get_link_ns_title(redirect.attrib["title"])}
                 external_links = set()
             else:
                 redirection = False
@@ -119,7 +154,7 @@ def transform_data(data_file_name, offset, full):
                 internal_links = {
                     get_link_ns_title(str(link.title))
                     for link in code.filter_wikilinks()
-                }
+                }.union(*get_template_ns_titles(ns, title, code))
                 external_links = {
                     str(link.url) for link in code.filter_external_links()
                 }
@@ -166,30 +201,63 @@ def load_data(connection, generator, step):
         #     print(" " * 2, link)
         # for link in external_links:
         #     print(" " * 2, link)
-        if ns != 0:
+        if ns not in [0, 14]:
             continue
         if step == 1:
             cursor.execute(
-                "INSERT OR IGNORE INTO internal_pages (id, ns, title, text) VALUES (?, ?, ?, ?)",
+                """
+                INSERT OR IGNORE INTO internal_pages (id, ns, title, text) 
+                VALUES (?, ?, ?, ?)
+                """,
                 (page_id, ns, title, None),
             )
         elif step == 2:
             if not redirection:
                 cursor.executemany(
-                    "INSERT OR IGNORE INTO internal_links (source_id, target_id) SELECT ?, id FROM internal_pages WHERE ns = ? AND title = ?",
+                    """
+                    INSERT OR IGNORE INTO internal_links (source_id, target_id) 
+                    SELECT ?, id FROM internal_pages WHERE ns = ? AND title = ?
+                    """,
                     [(page_id, *link) for link in internal_links],
                 )
+                external_domain_pages = {}
+                for link in external_links:
+                    extracted = tldextract.extract(link)
+                    external_domain_pages[link] = (
+                        f"{extracted.domain}.{extracted.suffix}",
+                        extracted.suffix,
+                    )
+                external_domains = set(external_domain_pages.values())
                 cursor.executemany(
-                    "INSERT OR IGNORE INTO external_pages (url) VALUES (?)",
-                    [(link,) for link in external_links],
+                    """
+                    INSERT OR IGNORE INTO external_domains (name, tld) 
+                    VALUES (?, ?)
+                    """,
+                    [(domain, suffix) for domain, suffix in external_domains],
                 )
                 cursor.executemany(
-                    "INSERT OR IGNORE INTO external_links (source_id, target_id) SELECT ?, id FROM external_pages WHERE url = ?",
+                    """
+                    INSERT OR IGNORE INTO external_pages (url, domain_id) 
+                    SELECT ?, id FROM external_domains WHERE name = ?
+                    """,
+                    [
+                        (link, domain)
+                        for link, (domain, suffix) in external_domain_pages.items()
+                    ],
+                )
+                cursor.executemany(
+                    """
+                    INSERT OR IGNORE INTO external_links (source_id, target_id) 
+                    SELECT ?, id FROM external_pages WHERE url = ?
+                    """,
                     [(page_id, link) for link in external_links],
                 )
             else:
                 cursor.execute(
-                    "INSERT OR IGNORE INTO redirects (source_id, target_id) SELECT ?, id FROM internal_pages WHERE ns = ? AND title = ?",
+                    """
+                    INSERT OR IGNORE INTO redirects (source_id, target_id) 
+                    SELECT ?, id FROM internal_pages WHERE ns = ? AND title = ?
+                    """,
                     (page_id, *next(iter(internal_links))),
                 )
     connection.commit()

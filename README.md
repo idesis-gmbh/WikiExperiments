@@ -165,6 +165,27 @@ Expected runtimes on Simple English Wikipedia:
 | ETL pass 2 (links) | ~450s |
 | PageRank (DuckDB) | ~10s |
 
+### Inspecting Results
+
+Once the pipeline has run, explore the results with:
+
+```bash
+uv run explore.py
+```
+
+This will print:
+
+- **Top 20 pages by PageRank** — the most important articles by link structure
+- **Degree distribution** — histogram of in-degree and out-degree across all pages
+- **Redirect statistics** — ratio of content pages to redirects
+- **Shortest path** — fewest hops between "Mathematics" and "Adolf Hitler", a classic Wikipedia game challenge
+
+To find the shortest path between two different articles, edit the last line of `explore.py`:
+
+```python
+shortest_path("Your source article", "Your target article")
+```
+
 ## Project Structure
 
 ```
@@ -172,6 +193,7 @@ wikiexperiments/
 ├── main.py          # pipeline orchestrator
 ├── etl.py           # ETL: parse Wikipedia dump, load into SQLite
 ├── pr.py            # PageRank: transfer to DuckDB, compute ranks
+├── explore.py       # inspect results: top pages, degree distribution, shortest path
 ├── config.py        # deployment settings (paths, wiki name, workers)
 ├── pyproject.toml   # project metadata and dependencies
 ├── uv.lock          # locked dependencies
