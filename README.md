@@ -79,7 +79,6 @@ The 50x DuckDB speedup makes the difference between a PageRank run that takes se
 ### Installation
 
 Clone the repository and install dependencies:
-
 ```bash
 git clone https://github.com/idesis-gmbh/wikiexperiments.git
 cd wikiexperiments
