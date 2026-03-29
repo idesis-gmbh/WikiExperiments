@@ -12,3 +12,4 @@ wheels/
 data/*.bz2
 data/*.db
 data/*.csv
+logs
