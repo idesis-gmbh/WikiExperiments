@@ -1,5 +1,6 @@
 import bz2
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED, as_completed
+import hashlib
 from itertools import islice
 from pathlib import Path
 import sqlite3
@@ -219,12 +220,36 @@ def load_data(connection, generator, step):
         if ns not in [0, 14]:
             continue
         if step == 1:
+            lead_id = None
+            if lead:
+                hash = hashlib.md5(lead.encode("utf-8")).hexdigest()
+                result = cursor.execute(
+                    """
+                    SELECT id, text
+                    FROM internal_texts 
+                    WHERE hash = ?
+                    """,
+                    (hash,)
+                )
+                for text_id, text in enumerate(result.fetchall()):
+                    if text == lead:
+                        lead_id = text_id
+                        break
+                if not lead_id:
+                    cursor.execute(
+                        """
+                        INSERT OR IGNORE INTO internal_texts (hash, text) 
+                        VALUES (?, ?)
+                        """,
+                        (hash, lead),
+                    )
+                    lead_id = cursor.lastrowid
             cursor.execute(
                 """
-                INSERT OR IGNORE INTO internal_pages (id, ns, title, text) 
+                INSERT OR IGNORE INTO internal_pages (id, ns, title, text_id) 
                 VALUES (?, ?, ?, ?)
                 """,
-                (page_id, ns, title, lead),
+                (page_id, ns, title, lead_id),
             )
         elif step == 2:
             if not redirection:
@@ -280,29 +305,17 @@ def load_data(connection, generator, step):
 
 def post_process_redirects(connection):
     cursor = connection.cursor()
-    result = cursor.execute(
-        """
-        SELECT source_id, t.text
+    cursor.execute(
+        """        
+        UPDATE internal_pages AS sp
+        SET text_id = tt.id
         FROM redirects r 
-        INNER JOIN internal_pages s ON s.id = source_id 
-        INNER JOIN internal_pages t ON t.id = target_id
-        WHERE s.text IS NULL and t.text IS NOT NULL
+        INNER JOIN internal_pages tp ON tp.id = r.target_id
+        INNER JOIN internal_texts tt on tt.id = tp.text_id
+        WHERE sp.id = r.source_id 
         """,
     )
-    for index, (page_id, lead) in enumerate(result.fetchall()):
-        cursor.execute(
-            """
-            UPDATE internal_pages 
-            SET text = ? 
-            WHERE id = ?
-            """,
-            (lead, page_id),
-        )
-        if index % 10000 == 0:
-            connection.commit()
-            print(".", end="", flush=True)
     connection.commit()
-    print(flush=True)
 
 
 def run_serial_etl(step, slices=None):

@@ -37,7 +37,7 @@ flowchart TD
     C --> L[search.py\nBM25 × PageRank]
 ```
 
-**1. ETL (`etl.py`)** — Parses a Wikipedia multistream dump in two passes. The index file locates compressed blocks in the data file, which are decompressed and parsed as XML using `mwparserfromhell`. Pass 1 loads all pages and their lead paragraph text into SQLite. Pass 2 loads internal links, external links, and redirects. Both passes run in parallel using `ProcessPoolExecutor`. A post-processing step propagates lead text from redirect targets back to redirect source pages, ensuring redirect pages are searchable. Finally, `update_schema()` builds the FTS5 virtual table and its associated triggers.
+**1. ETL (`etl.py`)** — Parses a Wikipedia multistream dump in two passes. The index file locates compressed blocks in the data file, which are decompressed and parsed as XML using `mwparserfromhell`. Pass 1 loads all pages into SQLite, storing lead paragraph text in a separate `internal_texts` table deduplicated by hash. Pass 2 loads internal links, external links, and redirects. Both passes run in parallel using `ProcessPoolExecutor`. A post-processing step propagates lead text from redirect targets back to redirect source pages, ensuring redirect pages are searchable. Finally, `update_schema()` builds two FTS5 virtual tables: `internal_texts_fts` over lead text content, and `internal_pages_fts` over page titles.
 
 **2. PageRank (`pr.py`)** — Copies the SQLite tables into DuckDB for analytical processing, then computes PageRank iteratively in SQL across both article pages (NS 0) and category pages (NS 14). A ping-pong buffer alternates between two rank columns (`rank1`, `rank2`) to ensure all source ranks within a single iteration are consistent. After convergence, each article's rank is augmented by the rank of its corresponding category page, combining the article-level and category-level importance signals. Results are written back to SQLite. For comparison, PageRank can also be run directly against the SQLite database.
 
@@ -48,8 +48,14 @@ flowchart TD
 The SQLite database (`wiki-oltp.db`) contains the following tables:
 
 ```
+internal_texts        — deduplicated lead paragraph texts
+                        id, hash, text
+                        (hash used for deduplication at insert time;
+                         redirect pages sharing a target's lead text
+                         reference the same row)
+
 internal_pages        — article and category pages (NS 0, NS 14)
-                        id, ns, title, text (lead paragraph),
+                        id, ns, title, text_id,
                         in_degree, out_degree, rank1, rank2
 
 internal_links        — directed links between internal pages
@@ -67,10 +73,16 @@ external_pages        — external URLs
 external_links        — links from internal pages to external URLs
                         source_id → target_id
 
-internal_pages_fts    — FTS5 virtual table over internal_pages
+internal_texts_fts    — FTS5 virtual table over internal_texts
+                        (content table, backed by internal_texts,
+                         unicode61 tokenizer with diacritic removal)
+
+internal_pages_fts    — FTS5 virtual table over internal_pages titles
                         (content table, backed by internal_pages,
                          unicode61 tokenizer with diacritic removal)
 ```
+
+Separating lead texts into `internal_texts` keeps `internal_pages` narrow. Since PageRank iterates over `internal_pages` repeatedly but never touches text, this has a measurable effect on SQLite performance: removing the wide `text` column from `internal_pages` reduced SQLite PageRank runtime by roughly 5x, from ~3600s to ~720s, even though the PageRank queries themselves are unchanged. DuckDB is unaffected because it already excluded the text column during the OLAP transfer.
 
 The external link tables capture the full outbound link graph of Wikipedia. As an example of what this enables: roughly 20% of all external links in Simple English Wikipedia point to the Wayback Machine (web.archive.org), making external domain analysis a natural candidate for future trust and source quality work.
 
@@ -88,31 +100,37 @@ One of the goals of this project is to compare SQLite and DuckDB as execution en
 
 | Stage | Time |
 |-------|------|
-| ETL pass 1 (pages + lead text) | ~175s |
-| ETL pass 2 (links) | ~505s |
-| Post-process (redirects) | ~5s |
-| FTS index build | ~26s |
-| PageRank — DuckDB (28 iterations) | ~10s |
-| PageRank — SQLite (28 iterations) | ~4150s |
+| ETL pass 1 (pages + lead text) | ~210s |
+| ETL pass 2 (links) | ~630s |
+| PageRank — DuckDB (28 iterations) | ~13s |
+| PageRank — SQLite (28 iterations) | ~720s |
 
 | Database | Size |
 |----------|------|
-| SQLite (wiki-oltp.db) | ~1.5 GB |
-| DuckDB (wiki-olap.db) | ~100 MB |
+| Wikipedia Archive | ~400 MB |
+| SQLite (simplewiki-oltp.db) | ~1.2 GB |
+| DuckDB (simplewiki-olap.db) | ~100 MB |
 
-DuckDB computes 28 iterations in 10 seconds — roughly **415x faster** than SQLite for the same workload. Both engines converge in exactly 28 iterations with numerically equivalent results, confirming correctness.
+DuckDB computes 28 iterations in 13 seconds — roughly **50x faster** than SQLite for the same workload. Both engines converge in exactly 28 iterations with numerically equivalent results, confirming correctness.
 
-The DuckDB database is also **15x smaller** than the SQLite equivalent. The OLAP transfer excludes the `text` column since PageRank does not use it, keeping the DuckDB database compact and the transfer fast. SQLite retains the full text for FTS queries.
+The DuckDB database is also **10x smaller** than the SQLite equivalent. The OLAP transfer excludes the `text_id` column and the `internal_texts` table entirely since PageRank does not use them, keeping the DuckDB database compact and the transfer fast.
 
 ### Results — Full English Wikipedia (estimated)
 
 | Stage | Time |
 |-------|------|
-| ETL pass 2 (links) | ~8 hrs |
+| ETL pass 1 (pages + lead text) | ~3 hrs |
+| ETL pass 2 (links) | ~9 hrs |
 | PageRank — DuckDB | ~10 min |
 | PageRank — SQLite | ~days |
 
-The 415x DuckDB speedup makes the difference between a PageRank run that takes minutes and one that would take days — a compelling case for columnar databases in iterative graph analytics.
+| Database | Size |
+|----------|------|
+| Wikipedia Archive | ~25 GB |
+| SQLite (simplewiki-oltp.db) | ~60 GB |
+| DuckDB (simplewiki-olap.db) | ~5 GB |
+
+The 54x DuckDB speedup makes the difference between a PageRank run that takes minutes and one that would take days — a compelling case for columnar databases in iterative graph analytics.
 
 ## Getting Started
 
@@ -155,7 +173,7 @@ curl -o data/simplewiki-latest-pages-articles-multistream.xml.bz2 https://dumps.
 |------|------|
 | Index | ~5 MB |
 | Data | ~375 MB |
-| SQLite database (generated) | ~1.5 GB |
+| SQLite database (generated) | ~1.2 GB |
 | DuckDB database (generated) | ~100 MB |
 
 After downloading, update `config.py` to match the wiki name and date:
@@ -212,9 +230,12 @@ Expected runtimes on Simple English Wikipedia:
 | Stage | Time |
 |-------|------|
 | Schema initialisation | ~0.1s |
-| ETL pass 1 (pages) | ~30s |
-| ETL pass 2 (links) | ~450s |
-| PageRank (DuckDB) | ~10s |
+| ETL pass 1 (pages + lead text) | ~210s |
+| ETL pass 2 (links) | ~630s |
+| Post-process (redirects) | ~1s |
+| FTS index build | ~18s |
+| PageRank (DuckDB) | ~13s |
+| Results transfer | ~2s |
 
 ### Searching
 
@@ -274,7 +295,7 @@ wikiexperiments/
 ├── sql/
 │   ├── create_oltp_tables.sql   # SQLite schema
 │   ├── create_oltp_indices.sql  # SQLite indices
-│   └── create_fts_tables.sql    # FTS5 virtual table and triggers
+│   └── create_fts_tables.sql    # FTS5 virtual tables (titles + texts) and triggers
 └── data/            # gitignored — local data only
     ├── .gitkeep
     ├── wiki-oltp.db             # SQLite database (generated)

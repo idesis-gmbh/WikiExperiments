@@ -43,40 +43,53 @@ def search_term(term, k=10):
         raw_pages = cursor.execute(            
             """
             WITH candidates AS (
-                SELECT 
-                    COALESCE(t.id, p.id) AS id, 
-                    COALESCE(t.ns, p.ns) AS ns, 
-                    COALESCE(t.title, p.title) AS title, 
-                    COALESCE(t.text, p.text) as text,
-                    bm25(internal_pages_fts, 5.0, 1.0) AS bm25, 
-                    COALESCE(t.rank1, p.rank1) AS rank, 
-                    CASE WHEN COALESCE(t.title, p.title) = ? THEN 'exact'
-                    WHEN COALESCE(t.title, p.title) LIKE ? || ' %' THEN 'prefix'
-                    WHEN COALESCE(t.title, p.title) LIKE '% ' || ? || ' %' THEN 'match' 
-                    WHEN COALESCE(t.title, p.title) LIKE '% ' || ? THEN 'suffix'
-                    ELSE 'fts' END AS score,
-                    CASE WHEN r.source_id = p.id THEN p.title ELSE NULL END AS redirect 
+                SELECT p.id, p.ns, p.title, t.text,
+                    -- bm25(internal_pages_fts) + bm25(internal_texts_fts) AS bm25, p.rank1 AS rank1, 
+                    bm25(internal_texts_fts) AS bm25, p.rank1 AS rank1, 
+                    CASE WHEN p.title = ? THEN 'exact'
+                    WHEN p.title LIKE ? || ' %' THEN 'prefix'
+                    WHEN p.title LIKE '% ' || ? || ' %' THEN 'match' 
+                    WHEN p.title LIKE '% ' || ? THEN 'suffix'
+                    ELSE 'fts' END AS score
                 FROM internal_pages p
-                INNER JOIN internal_pages_fts pfts ON pfts.rowid = p.id
-                LEFT JOIN redirects r ON r.source_id = p.id
-                LEFT JOIN internal_pages t ON t.id = r.target_id
-                WHERE p.ns = 0 
-                AND internal_pages_fts MATCH ?
+                -- INNER JOIN internal_pages_fts pfts ON pfts.rowid = p.id
+                INNER JOIN internal_texts t ON t.id = p.text_id
+                INNER JOIN internal_texts_fts tfts ON tfts.rowid = t.id
+                -- WHERE p.ns = 0 AND internal_pages_fts MATCH ? AND internal_texts_fts MATCH ? 
+                WHERE p.ns = 0 AND internal_texts_fts MATCH ? 
+                ORDER BY score, bm25
+                LIMIT ?
+            ),
+            redirect_candidates AS (
+                SELECT 
+                    COALESCE(t.id, s.id) AS id, 
+                    COALESCE(t.ns, s.ns) AS ns, 
+                    COALESCE(t.title, s.title) AS title, 
+                    COALESCE(t.text, s.text) AS text, 
+                    COALESCE(t.bm25, s.bm25) AS bm25, 
+                    COALESCE(t.rank1, s.rank1) AS rank, 
+                    COALESCE(t.score, s.score) AS score, 
+                    CASE WHEN r.source_id = s.id THEN s.title ELSE NULL END AS redirect 
+                FROM candidates s
+                LEFT JOIN redirects r ON r.source_id = s.id
+                LEFT JOIN candidates t ON t.id = r.target_id 
                 ORDER BY score, bm25
             ),
             extrema AS (
                 SELECT 
                     min(bm25) AS minimum_bm25,
                     max(rank) AS maximum_rank
-                FROM candidates
+                FROM redirect_candidates
             )
-            SELECT candidates.*
-            FROM candidates
+            SELECT redirect_candidates.*
+            FROM redirect_candidates
             CROSS JOIN extrema
-            WHERE score != 'fts' OR bm25 < .8 * minimum_bm25
+            -- WHERE score != 'fts' OR bm25 < .8 * minimum_bm25
+            WHERE score == 'exact' OR bm25 < .8 * minimum_bm25
+            -- WHERE bm25 < .8 * minimum_bm25
             ORDER BY search_term_order(score, minimum_bm25, bm25, maximum_rank, rank)
             """,
-            (term, term, term, term, query),
+            (term, term, term, term, query, 50 * k),
         ).fetchall()
         lookup = set()
         pages = []

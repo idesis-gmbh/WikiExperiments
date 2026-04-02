@@ -29,25 +29,26 @@ def dump(connection, debug=False):
 
 def page_rank(connection, ns):
     cursor = connection.cursor()
-
+    
+    args = ", ".join("?"*len(ns))
     cursor.execute(
-        """
+        f"""
         UPDATE internal_pages
         SET in_degree = (
             SELECT COUNT(*)
             FROM internal_links
             WHERE internal_links.target_id = internal_pages.id
-        ), out_degree = (
+        ) , out_degree = (
             SELECT COUNT(*)
             FROM internal_links
             WHERE internal_links.source_id = internal_pages.id
         ), rank1 = 1.0 / (
             SELECT COUNT(*) 
             FROM internal_pages
-            WHERE ns IN ?		
+            WHERE ns IN ({args})
         )
-        WHERE ns IN ?""",
-        (ns, ns),
+        WHERE ns IN ({args})""",
+        (*ns, *ns),
     )
 
     for index in range(MAX_ITERATIONS):
@@ -62,8 +63,8 @@ def page_rank(connection, ns):
             f"""
             UPDATE internal_pages
             SET {rank2} = 0.0
-            WHERE ns IN ?""",
-            (ns,),
+            WHERE ns IN ({args})""",
+            (*ns,),
         )
 
         cursor.execute(
@@ -72,15 +73,15 @@ def page_rank(connection, ns):
                 SELECT target_id, SUM({rank1} / out_degree) AS rank 
                 FROM internal_pages
                 INNER JOIN internal_links ON source_id = id
-                WHERE ns in ?
+                WHERE ns in ({args})
                 GROUP BY target_id
             )
             UPDATE internal_pages 
             SET {rank2} = internal_pages.{rank2} + connected_page_ranks.rank
             FROM connected_page_ranks
             WHERE internal_pages.id = connected_page_ranks.target_id
-            AND ns IN ?""",
-            (ns, ns),
+            AND ns IN ({args})""",
+            (*ns, *ns),
         )
 
         cursor.execute(
@@ -88,13 +89,13 @@ def page_rank(connection, ns):
             WITH disconnected_page_ranks AS (
                 SELECT (1.0 - sum({rank2})) / COUNT(*) AS rank
                 FROM internal_pages
-                WHERE ns IN ?
+                WHERE ns IN ({args})
             )
             UPDATE internal_pages
             SET {rank2} = internal_pages.{rank2} + disconnected_page_ranks.rank
             FROM disconnected_page_ranks
-            WHERE ns IN ?""",
-            (ns, ns),
+            WHERE ns IN ({args})""",
+            (*ns, *ns),
         )
 
         cursor.execute(
@@ -102,16 +103,16 @@ def page_rank(connection, ns):
             UPDATE internal_pages
             SET {rank2} =  {1.0 - DAMPING_FACTOR} / (SELECT COUNT(*) FROM internal_pages) + 
                         {DAMPING_FACTOR} * ({rank2})
-            WHERE ns IN ?""",
-            (ns,),
+            WHERE ns IN ({args})""",
+            (*ns,),
         )
 
         result = cursor.execute(
             f"""
             SELECT MAX(ABS({rank1} - {rank2})) AS max_delta
             FROM internal_pages
-            WHERE ns IN ?""",
-            (ns,),
+            WHERE ns IN ({args})""",
+            (*ns,),
         )
         max_delta = result.fetchone()[0]
         print(f"Delta {max_delta}")
@@ -120,8 +121,8 @@ def page_rank(connection, ns):
                 f"""
                 UPDATE internal_pages
                 SET {rank1} = {rank2}
-                WHERE ns IN ?""",
-                (ns,),
+                WHERE ns IN ({args})""",
+                (*ns,),
             )
             break
 
@@ -142,7 +143,7 @@ def create_olap_db(oltp_db_file_name, olap_db_file_name):
             ATTACH '{oltp_db_file_name}' AS sqlite_db (TYPE SQLITE)""")
         connection.execute("""
             CREATE OR REPLACE TABLE internal_pages AS 
-            SELECT * FROM sqlite_db.internal_pages""")
+            SELECT * EXCLUDE(text_id) FROM sqlite_db.internal_pages""")
         connection.execute("""
             CREATE OR REPLACE TABLE internal_links AS 
             SELECT * FROM sqlite_db.internal_links""")
