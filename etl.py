@@ -229,7 +229,7 @@ def load_data(connection, generator, step):
                     FROM internal_texts 
                     WHERE hash = ?
                     """,
-                    (hash,)
+                    (hash,),
                 )
                 for text_id, text in enumerate(result.fetchall()):
                     if text == lead:

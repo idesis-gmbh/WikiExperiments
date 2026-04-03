@@ -29,8 +29,8 @@ def dump(connection, debug=False):
 
 def page_rank(connection, ns):
     cursor = connection.cursor()
-    
-    args = ", ".join("?"*len(ns))
+
+    args = ", ".join("?" * len(ns))
     cursor.execute(
         f"""
         UPDATE internal_pages

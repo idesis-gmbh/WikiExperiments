@@ -1,13 +1,15 @@
+DROP TABLE IF EXISTS internal_texts_vocab;
 DROP TABLE IF EXISTS internal_texts_fts;
+DROP TABLE IF EXISTS internal_pages_vocab;
 DROP TABLE IF EXISTS internal_pages_fts;
 
 CREATE VIRTUAL TABLE internal_texts_fts USING fts5(
     text,
     content='internal_texts',
     content_rowid='id',
-    tokenize='unicode61 remove_diacritics 2'
+    -- tokenize='unicode61 remove_diacritics 2'
     -- tokenize='porter unicode61 remove_diacritics 2'
-    -- tokenize='trigram'
+    tokenize='trigram'
 );
 
 INSERT INTO internal_texts_fts(rowid, text)
@@ -36,13 +38,15 @@ BEGIN
     VALUES (new.id, new.text);
 END;
 
+CREATE VIRTUAL TABLE internal_texts_vocab USING fts5vocab(internal_texts_fts, 'row');
+
 CREATE VIRTUAL TABLE internal_pages_fts USING fts5(
     title,
     content='internal_pages',
     content_rowid='id',
-    tokenize='unicode61 remove_diacritics 2'
+    -- tokenize='unicode61 remove_diacritics 2'
     -- tokenize='porter unicode61 remove_diacritics 2'
-    -- tokenize='trigram'
+    tokenize='trigram'
 );
 
 INSERT INTO internal_pages_fts(rowid, title)
@@ -71,3 +75,4 @@ BEGIN
     VALUES (new.id, new.title, new.text);
 END;
 
+CREATE VIRTUAL TABLE internal_pages_vocab USING fts5vocab(internal_pages_fts, 'row');

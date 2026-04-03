@@ -9,6 +9,7 @@ wheels/
 # Virtual environments
 .venv
 
+data/DBpedia-Entity
 data/*.bz2
 data/*.db
 data/*.csv
