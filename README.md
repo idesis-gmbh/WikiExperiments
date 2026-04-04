@@ -41,7 +41,7 @@ flowchart TD
 
 **2. PageRank (`pr.py`)** — Copies the SQLite tables into DuckDB for analytical processing, then computes PageRank iteratively in SQL across both article pages (NS 0) and category pages (NS 14). A ping-pong buffer alternates between two rank columns (`rank1`, `rank2`) to ensure all source ranks within a single iteration are consistent. After convergence, each article's rank is augmented by the rank of its corresponding category page, combining the article-level and category-level importance signals. Results are written back to SQLite. For comparison, PageRank can also be run directly against the SQLite database.
 
-**3. Search (`search.py`)** — Queries the SQLite database using a single SQL query that combines FTS5 full-text search with PageRank ranking. Results are classified by match type (exact title, prefix, infix, suffix, or FTS), and FTS results are filtered by a BM25 threshold before being ranked by the product of BM25 score and PageRank. Redirects are resolved transparently so that a search for "Einstein" returns the Albert Einstein article even if the matching page is a redirect.
+**3. Search (`search.py`)** — Queries the SQLite database using two parallel FTS streams: one over page titles (`internal_pages_fts`) and one over lead text (`internal_texts_fts`). Before querying, each stream filters out high-frequency terms using IDF scores from the FTS vocabulary tables. The two result sets are merged and re-ranked by a normalised weighted combination of BM25 and PageRank. Redirects are resolved transparently so that a search for "Einstein" returns the Albert Einstein article even if the matching page is a redirect.
 
 ## Data Model
 
@@ -82,7 +82,7 @@ internal_pages_fts    — FTS5 virtual table over internal_pages titles
                          unicode61 tokenizer with diacritic removal)
 ```
 
-Separating lead texts into `internal_texts` keeps `internal_pages` narrow. Since PageRank iterates over `internal_pages` repeatedly but never touches text, this has a measurable effect on SQLite performance: removing the wide `text` column from `internal_pages` reduced SQLite PageRank runtime by roughly 5x, from ~3600s to ~720s, even though the PageRank queries themselves are unchanged. DuckDB is unaffected because it already excluded the text column during the OLAP transfer.
+Separating lead texts into `internal_texts` keeps `internal_pages` narrow. Since PageRank iterates over `internal_pages` repeatedly but never touches text, this has a measurable effect on SQLite performance: removing the wide `text` column from `internal_pages` reduced SQLite PageRank runtime by roughly 6x, from ~4150s to ~705s, even though the PageRank queries themselves are unchanged. DuckDB is unaffected because it already excluded the text column during the OLAP transfer.
 
 The external link tables capture the full outbound link graph of Wikipedia. As an example of what this enables: roughly 20% of all external links in Simple English Wikipedia point to the Wayback Machine (web.archive.org), making external domain analysis a natural candidate for future trust and source quality work.
 
@@ -111,9 +111,9 @@ One of the goals of this project is to compare SQLite and DuckDB as execution en
 | SQLite (simplewiki-oltp.db) | ~1.2 GB |
 | DuckDB (simplewiki-olap.db) | ~100 MB |
 
-DuckDB computes 28 iterations in 13 seconds — roughly **50x faster** than SQLite for the same workload. Both engines converge in exactly 28 iterations with numerically equivalent results, confirming correctness.
+DuckDB computes 28 iterations in 13 seconds — roughly **54x faster** than SQLite for the same workload. Both engines converge in exactly 28 iterations with numerically equivalent results, confirming correctness.
 
-The DuckDB database is also **10x smaller** than the SQLite equivalent. The OLAP transfer excludes the `text_id` column and the `internal_texts` table entirely since PageRank does not use them, keeping the DuckDB database compact and the transfer fast.
+The DuckDB database is also **12x smaller** than the SQLite equivalent. The OLAP transfer excludes the `text_id` column and the `internal_texts` table entirely since PageRank does not use them, keeping the DuckDB database compact and the transfer fast.
 
 ### Results — Full English Wikipedia (estimated)
 
@@ -200,7 +200,7 @@ This will:
 2. ETL pass 1 — parse and load pages and lead text into SQLite
 3. ETL pass 2 — parse and load links and redirects into SQLite
 4. Post-process — propagate lead text through redirect chains
-5. Build FTS index — create the `internal_pages_fts` virtual table
+5. Build FTS index — create `internal_pages_fts` (titles) and `internal_texts_fts` (lead text) virtual tables
 6. Transfer to DuckDB and compute PageRank
 7. Transfer PageRank results back to SQLite
 
@@ -245,17 +245,17 @@ Once the pipeline has run, search the database with:
 uv run search.py "your query"
 ```
 
-Results are printed to stdout and include the page title, match type, BM25 score, PageRank, and lead text. For example:
+Results are printed to stdout and include the page title, BM25 score, PageRank, and lead text. An optional second argument redirects output to a log file:
 
 ```bash
-uv run search.py "World War II"
-uv run search.py "Einstein"
-uv run search.py "DNA"
+uv run search.py "your query" logs/query.log
 ```
 
-The search engine combines FTS5 full-text search with PageRank ranking. Results are classified by match type in descending priority — exact title match, prefix, infix, suffix, and finally FTS — with FTS results filtered by a BM25 quality threshold before being ranked by the product of BM25 score and PageRank. Redirects are resolved transparently.
+The search engine runs two parallel FTS streams — one over page titles, one over lead text — each with IDF-based stopword filtering to suppress high-frequency terms before querying. The two result sets are merged and re-ranked by a normalised weighted combination of BM25 and PageRank, with redirect resolution applied transparently.
 
-The ranking approach produces good results on a wide range of queries but has not yet been evaluated systematically. Anecdotal results on Simple English Wikipedia are promising: thematic FTS results (e.g. Francis Crick and Rosalind Franklin for "DNA", Bose-Einstein condensate for "Einstein") rank alongside direct title matches, and the BM25 threshold effectively suppresses weakly related noise.
+The focus is on keyword search rather than semantic similarity: queries are matched against indexed terms directly, without embeddings or query expansion. This makes the system fast and interpretable, and well suited to the kind of entity-oriented queries (names, concepts, proper nouns) that dominate Wikipedia navigation.
+
+The ranking has not yet been evaluated against full English Wikipedia. On Simple English Wikipedia, mean nDCG@10 is approximately 0.4 against the resolvable subset of the SemSearch_ES queries from DBpedia-Entity v2 [Hasibi et al., SIGIR 2017](https://github.com/iai-group/DBpedia-Entity) — a keyword-oriented entity retrieval benchmark. This figure should be treated as a reproducible development baseline rather than an absolute quality claim: Simple English Wikipedia covers only a fraction of the entities in the DBpedia-Entity qrels, and the corpus mismatch makes direct comparison with full-corpus results inappropriate.
 
 ### Inspecting Results
 
@@ -285,7 +285,8 @@ wikiexperiments/
 ├── main.py          # pipeline orchestrator
 ├── etl.py           # ETL: parse Wikipedia dump, load into SQLite, build FTS index
 ├── pr.py            # PageRank: transfer to DuckDB, compute ranks, write back
-├── search.py        # search: BM25 × PageRank ranked full-text search
+├── search.py        # search: two-stream BM25 × PageRank ranked full-text search
+├── ndcg.py          # evaluation: nDCG@10 against DBpedia-Entity v2 SemSearch_ES
 ├── explore.py       # inspect results: top pages, degree distribution, shortest path
 ├── config.py        # deployment settings (paths, wiki name, workers)
 ├── pyproject.toml   # project metadata and dependencies
@@ -296,15 +297,18 @@ wikiexperiments/
 │   ├── create_oltp_tables.sql   # SQLite schema
 │   ├── create_oltp_indices.sql  # SQLite indices
 │   └── create_fts_tables.sql    # FTS5 virtual tables (titles + texts) and triggers
+├── logs/            # gitignored — evaluation output
+│   └── .gitkeep
 └── data/            # gitignored — local data only
     ├── .gitkeep
     ├── wiki-oltp.db             # SQLite database (generated)
-    └── wiki-olap.db             # DuckDB database (generated)
+    ├── wiki-olap.db             # DuckDB database (generated)
+    └── DBpedia-Entity/          # clone of iai-group/DBpedia-Entity (evaluation)
 ```
 
 ## Future Work
 
-**Search evaluation infrastructure** — the current search ranking combines BM25 and PageRank and produces promising anecdotal results, but no systematic evaluation exists. Building a small set of labelled queries with relevance judgements, and using a metric like nDCG@10 to compare ranking variants, is the natural next step before tuning the scoring further.
+**Search evaluation against full English Wikipedia** — the evaluation harness in `ndcg.py` runs against the SemSearch_ES subset of DBpedia-Entity v2 ([Hasibi et al., SIGIR 2017](https://github.com/iai-group/DBpedia-Entity)), a keyword-oriented entity retrieval benchmark. On Simple English Wikipedia the mean nDCG@10 is approximately 0.4 against the resolvable qrels, serving as a development baseline. Running the full pipeline against English Wikipedia and evaluating against the complete DBpedia-Entity v2 qrels would yield a meaningful absolute score and enable direct comparison with published retrieval systems.
 
 **External link trust and source quality** — the ETL pipeline captures the full external link graph, including domain and TLD information via `tldextract`. Initial analysis shows that a substantial fraction of all external links point to archival sources (e.g. the Wayback Machine). A systematic analysis of the external link graph could yield a network of source trust or citation quality, complementing the internal PageRank signal.
 

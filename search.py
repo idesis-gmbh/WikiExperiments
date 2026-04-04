@@ -1,4 +1,3 @@
-from collections import defaultdict
 import math
 from pprint import pprint
 import sqlite3
@@ -48,9 +47,9 @@ def fts5_escape(query, n=100):
 def search_query_order(minimum_bm25, bm25, maximum_rank, rank):
     # assert bm25 * rank >= minimum_bm25 * maximum_rank
     # return bm25 * rank
-    norm_bm25 = - bm25 / minimum_bm25
-    norm_rank = - rank / maximum_rank
-    alpha = .6
+    norm_bm25 = -bm25 / minimum_bm25
+    norm_rank = -rank / maximum_rank
+    alpha = 0.6
     return alpha * norm_bm25 + (1 - alpha) * norm_rank
 
 
@@ -74,8 +73,7 @@ def search_query(query, k=10):
                 FROM internal_pages p
                 INNER JOIN internal_pages_fts pfts ON pfts.rowid = p.id
                 INNER JOIN internal_texts t ON t.id = p.text_id
-                -- WHERE p.ns = 0 AND internal_pages_fts MATCH ? 
-                WHERE internal_pages_fts MATCH ? 
+                WHERE p.ns = 0 AND internal_pages_fts MATCH ? 
                 ORDER BY bm25
             ),
             text_candidates AS (
@@ -84,8 +82,7 @@ def search_query(query, k=10):
                 FROM internal_pages p
                 INNER JOIN internal_texts t ON t.id = p.text_id
                 INNER JOIN internal_texts_fts tfts ON tfts.rowid = t.id
-                -- WHERE p.ns = 0 AND internal_texts_fts MATCH ? 
-                WHERE internal_texts_fts MATCH ? 
+                WHERE p.ns = 0 AND internal_texts_fts MATCH ? 
                 ORDER BY bm25
             ),
             candidates AS (
@@ -144,106 +141,9 @@ def search_query(query, k=10):
         return match_titles, match_texts, pages[:k]
 
 
-def search_title(title):
-    with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
-        cursor = connection.cursor()
-        pages = cursor.execute(
-            """
-            SELECT * 
-            FROM internal_pages
-            WHERE ns = 0 AND title = ? 
-            """,
-            (title[9:-1].replace("_", " "),),
-        ).fetchall()
-        return bool(pages)
-
-
-def dcg(qrels):
-    return sum(
-        rel / math.log2(rank + 1)
-        for rank, (title, rel) in enumerate(qrels, start=1)
-        if rel > 0
-    )
-
-
-def ndcg(items, qrels, k=10):
-    actual_dcg = dcg(items[:k])
-    ideal_dcg = dcg(qrels[:k])
-    if ideal_dcg == 0:
-        return 0.0
-    return actual_dcg / ideal_dcg
-
-
 if __name__ == "__main__":
     if len(sys.argv) > 2:
         with open(sys.argv[2], "w", encoding="utf-8") as log_file:
             pprint(search_query(sys.argv[1]), log_file)
     elif len(sys.argv) > 1:
         pprint(search_query(sys.argv[1]))
-    else:
-        qrels = defaultdict(dict)
-        with open("data/DBpedia-Entity/collection/v2/qrels-v2.txt", "r", encoding="utf-8") as in_file:
-            for line in in_file:
-                key, _, title, relevance = line.strip().split(maxsplit=3)
-                if not key.startswith("SemSearch_ES"):
-                    continue
-                found = search_title(title)
-                qrels[key][title] = (int(relevance), found)
-                # qrels[key][title] = (int(relevance), None)
-        with (
-            open("logs/answers-v2.log", "w", encoding="utf-8") as log_file,
-            open(
-                "data/DBpedia-Entity/collection/v2/queries-v2_stopped.txt", "r", encoding="utf-8"
-            ) as in_file,
-        ):
-            k = 10
-            count_ndcg = 0
-            sum_ndcg = 0.0
-            for line in in_file:
-                answer = {}
-                key, query = line.strip().split(maxsplit=1)
-                if not key.startswith("SemSearch_ES"):
-                    continue
-                answer["key"] = key
-                answer["query"] = query
-                # answer["qrels"] = qrels[key]
-                resolvable_qrels = sorted(
-                    [
-                        (title, rel)
-                        for title, (rel, found) in qrels[key].items()
-                        if found == True
-                    ],
-                    key=lambda row: row[1],
-                    reverse=True,
-                )
-                # print(resolvable_qrels)
-                answer["qrels"] = resolvable_qrels
-                match_titles, match_texts, items = search_query(query, k=k)
-                answer["match_titles"] = match_titles
-                answer["match_texts"] = match_texts
-                answer["items"] = items
-                for item in answer["items"]:
-                    title = f"<dbpedia:{item['title'].replace(' ', '_')}>"
-                    if title in qrels[key]:
-                        item["relevance"] = qrels[key][title]
-                answer_qrels = sorted(
-                    [
-                        (item["title"], item["relevance"][0])
-                        for item in answer["items"]
-                        if "relevance" in item and item["relevance"][1] == True
-                    ],
-                    key=lambda row: row[1],
-                    reverse=True,
-                )
-                # print(answer_qrels)
-                print("query", query, file=log_file)
-                print(
-                    "relevant & found",
-                    sum(1 for (title, rel) in resolvable_qrels if rel > 0),
-                    file=log_file,
-                )
-                count_ndcg += 1
-                this_ndcg = ndcg(answer_qrels, resolvable_qrels, k=k)
-                sum_ndcg += this_ndcg
-                print("ndcg", this_ndcg, file=log_file)
-        print("mean ndcg", sum_ndcg / count_ndcg)

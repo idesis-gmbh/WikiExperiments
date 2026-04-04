@@ -13,4 +13,4 @@ data/DBpedia-Entity
 data/*.bz2
 data/*.db
 data/*.csv
-logs
+logs/*.log
