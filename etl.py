@@ -1,5 +1,6 @@
 import bz2
 from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED, as_completed
+import hashlib
 from itertools import islice
 from pathlib import Path
 import sqlite3
@@ -132,7 +133,7 @@ def get_template_ns_titles(ns, title, code):
             pass
 
 
-def transform_data(data_file_name, offset, full):
+def transform_data(data_file_name, offset, step):
     data = extract_data(data_file_name, offset)
     xml = f"<root>{data.decode('utf-8')}</root>"
     root = ET.fromstring(xml)
@@ -140,17 +141,24 @@ def transform_data(data_file_name, offset, full):
     for page in root.iter("page"):
         # dump_xml(page)
         title = page.find("title").text
-        ns = page.find("ns").text
-        page_id = page.find("id").text
-        if full:
-            redirect = page.find("redirect")
-            if redirect is not None:
-                redirection = True
+        ns = int(page.find("ns").text)
+        page_id = int(page.find("id").text)
+        redirect = page.find("redirect")
+        redirection = redirect is not None
+        if step == 1 and ns == 0 and not redirection:
+            text = page.find("revision").find("text").text
+            code = mwparserfromhell.parse(text)
+            lead = str(code.get_sections(include_lead=True)[0]).strip()
+            # assert lead
+        else:
+            lead = None
+        if step == 2:
+            if redirection:
                 internal_links = {get_link_ns_title(redirect.attrib["title"])}
                 external_links = set()
             else:
-                redirection = False
-                code = mwparserfromhell.parse(page.find("revision").find("text").text)
+                text = page.find("revision").find("text").text
+                code = mwparserfromhell.parse(text)
                 internal_links = {
                     get_link_ns_title(str(link.title))
                     for link in code.filter_wikilinks()
@@ -159,14 +167,21 @@ def transform_data(data_file_name, offset, full):
                     str(link.url) for link in code.filter_external_links()
                 }
         else:
-            redirection = None
             internal_links = None
             external_links = None
-        yield title, int(ns), int(page_id), redirection, internal_links, external_links
+        yield (
+            title,
+            ns,
+            page_id,
+            redirection,
+            lead,
+            internal_links,
+            external_links,
+        )
 
 
-def transform_data_list(data_file_name, offset, full):
-    return list(transform_data(data_file_name, offset, full))
+def transform_data_list(data_file_name, offset, step):
+    return list(transform_data(data_file_name, offset, step))
 
 
 def sqlite3_settings(connection):
@@ -193,6 +208,7 @@ def load_data(connection, generator, step):
         ns,
         page_id,
         redirection,
+        lead,
         internal_links,
         external_links,
     ) in generator:
@@ -204,12 +220,36 @@ def load_data(connection, generator, step):
         if ns not in [0, 14]:
             continue
         if step == 1:
+            lead_id = None
+            if lead:
+                hash = hashlib.md5(lead.encode("utf-8")).hexdigest()
+                result = cursor.execute(
+                    """
+                    SELECT id, text
+                    FROM internal_texts 
+                    WHERE hash = ?
+                    """,
+                    (hash,),
+                )
+                for text_id, text in enumerate(result.fetchall()):
+                    if text == lead:
+                        lead_id = text_id
+                        break
+                if not lead_id:
+                    cursor.execute(
+                        """
+                        INSERT OR IGNORE INTO internal_texts (hash, text) 
+                        VALUES (?, ?)
+                        """,
+                        (hash, lead),
+                    )
+                    lead_id = cursor.lastrowid
             cursor.execute(
                 """
-                INSERT OR IGNORE INTO internal_pages (id, ns, title, text) 
+                INSERT OR IGNORE INTO internal_pages (id, ns, title, text_id) 
                 VALUES (?, ?, ?, ?)
                 """,
-                (page_id, ns, title, None),
+                (page_id, ns, title, lead_id),
             )
         elif step == 2:
             if not redirection:
@@ -263,14 +303,29 @@ def load_data(connection, generator, step):
     connection.commit()
 
 
-def run_serial_etl_data(step, slices=None):
+def post_process_redirects(connection):
+    cursor = connection.cursor()
+    cursor.execute(
+        """        
+        UPDATE internal_pages AS sp
+        SET text_id = tt.id
+        FROM redirects r 
+        INNER JOIN internal_pages tp ON tp.id = r.target_id
+        INNER JOIN internal_texts tt on tt.id = tp.text_id
+        WHERE sp.id = r.source_id 
+        """,
+    )
+    connection.commit()
+
+
+def run_serial_etl(step, slices=None):
     index_file_name = INDEX_FILE_NAME
     data_file_name = DATA_FILE_NAME
     with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
         sqlite3_settings(connection)
         # NOTE: when developing you can remove old database contents here
         # init_data(connection)
-        for offset, pages in (
+        for index, (offset, pages) in enumerate(
             islice(transform_index(index_file_name), slices)
             if slices
             else transform_index(index_file_name)
@@ -279,9 +334,12 @@ def run_serial_etl_data(step, slices=None):
             load_data(
                 connection, transform_data(data_file_name, offset, step == 2), step
             )
+            if index % 100 == 0:
+                print(".", end="", flush=True)
+        print(flush=True)
 
 
-def run_parallel_etl_data(step, slices=None, max_workers=MAX_WORKERS):
+def run_parallel_etl(step, slices=None, max_workers=MAX_WORKERS):
     index_file_name = INDEX_FILE_NAME
     data_file_name = DATA_FILE_NAME
     with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
@@ -290,23 +348,32 @@ def run_parallel_etl_data(step, slices=None, max_workers=MAX_WORKERS):
         # init_data(connection)
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             futures = set()
-            for offset, pages in (
+            for index, (offset, pages) in enumerate(
                 islice(transform_index(index_file_name), slices)
                 if slices
                 else transform_index(index_file_name)
             ):
                 # print("Processing strean at offset", offset)
                 futures.add(
-                    executor.submit(
-                        transform_data_list, data_file_name, offset, step == 2
-                    )
+                    executor.submit(transform_data_list, data_file_name, offset, step)
                 )
                 if len(futures) > max_workers:
                     completed, futures = wait(futures, return_when=FIRST_COMPLETED)
                     for future in completed:
                         load_data(connection, future.result(), step)
+                        if index % 100 == 0:
+                            print(".", end="", flush=True)
             for future in as_completed(futures):
                 load_data(connection, future.result(), step)
+                if index % 100 == 0:
+                    print(".", end="", flush=True)
+        print(flush=True)
+
+
+def post_process():
+    with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
+        sqlite3_settings(connection)
+        post_process_redirects(connection)
 
 
 def init_schema():
@@ -314,7 +381,16 @@ def init_schema():
         print(f"Database {OLTP_DB_FILE_NAME} already exists, skipping schema init.")
         return
     with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
+        sqlite3_settings(connection)
         for file_name in ["sql/create_oltp_tables.sql", "sql/create_oltp_indices.sql"]:
+            with open(file_name) as file:
+                connection.executescript(file.read())
+
+
+def update_schema():
+    with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
+        sqlite3_settings(connection)
+        for file_name in ["sql/create_fts_tables.sql"]:
             with open(file_name) as file:
                 connection.executescript(file.read())
 
@@ -325,13 +401,21 @@ def run(max_workers=MAX_WORKERS):
     end = time.time()
     print(f"Initialized schema: {end - start:.2f} seconds")
     start = time.time()
-    run_parallel_etl_data(1, max_workers=max_workers)
+    run_parallel_etl(1, max_workers=max_workers)
     end = time.time()
     print(f"ETL step 1: {end - start:.2f} seconds")
     start = time.time()
-    run_parallel_etl_data(2, max_workers=max_workers)
+    run_parallel_etl(2, max_workers=max_workers)
     end = time.time()
     print(f"ETL step 2: {end - start:.2f} seconds")
+    start = time.time()
+    post_process()
+    end = time.time()
+    print(f"Postprocess: {end - start:.2f} seconds")
+    start = time.time()
+    update_schema()
+    end = time.time()
+    print(f"Updated schema: {end - start:.2f} seconds")
 
 
 if __name__ == "__main__":

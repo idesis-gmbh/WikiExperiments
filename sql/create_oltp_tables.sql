@@ -4,18 +4,27 @@ DROP TABLE IF EXISTS external_pages;
 DROP TABLE IF EXISTS external_domains;
 DROP TABLE IF EXISTS internal_links;
 DROP TABLE IF EXISTS internal_pages;
+DROP TABLE IF EXISTS internal_texts;
+
+CREATE TABLE internal_texts (
+    id INTEGER,
+    hash TEXT,
+    text TEXT,
+    PRIMARY KEY(id)
+);
 
 CREATE TABLE internal_pages (
     id INTEGER,
     ns INTEGER,
     title TEXT,
-    text TEXT,
+    text_id INTEGER,
     in_degree INTEGER,
     out_degree INTEGER,
     rank1 REAL,
     rank2 REAL,
     PRIMARY KEY(id),
-    UNIQUE(ns, title)
+    UNIQUE(ns, title),
+    FOREIGN KEY(text_id) REFERENCES internal_texts(id)
 );
 
 CREATE TABLE internal_links (

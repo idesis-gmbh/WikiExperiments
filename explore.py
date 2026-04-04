@@ -2,7 +2,7 @@ from collections import deque
 import duckdb
 import sqlite3
 
-from config import OLTP_DB_FILE_NAME, OLAP_DB_FILE_NAME
+from config import OLTP_DB_FILE_NAME
 
 
 def shortest_path(source_title, target_title):
@@ -74,7 +74,7 @@ def redirect_statistics():
 
 def degree_distribution():
     print("\n--- Degree distribution ---")
-    with duckdb.connect(OLAP_DB_FILE_NAME) as connection:
+    with duckdb.connect(OLTP_DB_FILE_NAME) as connection:
         for degree_column in ("in_degree", "out_degree"):
             print(f"\n  {degree_column}:")
             result = connection.execute(
