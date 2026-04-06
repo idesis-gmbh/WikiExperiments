@@ -1,13 +1,11 @@
 from collections import deque
-import duckdb
-import sqlite3
 
-from config import OLTP_DB_FILE_NAME
+from db import sqlite_connect
 
 
 def shortest_path(source_title, target_title):
     print(f"\n--- Shortest path: '{source_title}' → '{target_title}' ---")
-    with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
+    with sqlite_connect() as connection:
 
         def get_id(title):
             row = connection.execute(
@@ -63,7 +61,7 @@ def shortest_path(source_title, target_title):
 
 def redirect_statistics():
     print("\n--- Redirect statistics ---")
-    with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
+    with sqlite_connect() as connection:
         total = connection.execute("SELECT COUNT(*) FROM internal_pages").fetchone()[0]
         redirects = connection.execute("SELECT COUNT(*) FROM redirects").fetchone()[0]
         content = total - redirects
@@ -74,7 +72,7 @@ def redirect_statistics():
 
 def degree_distribution():
     print("\n--- Degree distribution ---")
-    with duckdb.connect(OLTP_DB_FILE_NAME) as connection:
+    with sqlite_connect() as connection:
         for degree_column in ("in_degree", "out_degree"):
             print(f"\n  {degree_column}:")
             result = connection.execute(
@@ -102,7 +100,7 @@ def degree_distribution():
 
 def top_pages_by_pagerank(n=20):
     print(f"\n--- Top {n} pages by PageRank ---")
-    with duckdb.connect(OLAP_DB_FILE_NAME) as connection:
+    with sqlite_connect() as connection:
         result = connection.execute(
             f"""
             SELECT title, rank1

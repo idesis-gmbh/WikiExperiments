@@ -3,13 +3,13 @@ from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED, as_co
 import hashlib
 from itertools import islice
 from pathlib import Path
-import sqlite3
 import time
 import xml.etree.ElementTree as ET
 import mwparserfromhell
 import tldextract
 
 from config import INDEX_FILE_NAME, DATA_FILE_NAME, OLTP_DB_FILE_NAME, MAX_WORKERS
+from db import sqlite_connect
 
 
 def extract_index(index_file_name):
@@ -184,12 +184,6 @@ def transform_data_list(data_file_name, offset, step):
     return list(transform_data(data_file_name, offset, step))
 
 
-def sqlite3_settings(connection):
-    # connection.execute("PRAGMA journal_mode = persist")
-    connection.execute("PRAGMA journal_mode = wal")
-    connection.execute("PRAGMA cache_size = -4000000")
-
-
 def init_data(connection, full):
     cursor = connection.cursor()
     cursor.execute("DELETE FROM redirects")
@@ -321,8 +315,7 @@ def post_process_redirects(connection):
 def run_serial_etl(step, slices=None):
     index_file_name = INDEX_FILE_NAME
     data_file_name = DATA_FILE_NAME
-    with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
-        sqlite3_settings(connection)
+    with sqlite_connect() as connection:
         # NOTE: when developing you can remove old database contents here
         # init_data(connection)
         for index, (offset, pages) in enumerate(
@@ -342,8 +335,7 @@ def run_serial_etl(step, slices=None):
 def run_parallel_etl(step, slices=None, max_workers=MAX_WORKERS):
     index_file_name = INDEX_FILE_NAME
     data_file_name = DATA_FILE_NAME
-    with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
-        sqlite3_settings(connection)
+    with sqlite_connect() as connection:
         # NOTE: when developing you can remove old database contents here
         # init_data(connection)
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
@@ -371,8 +363,7 @@ def run_parallel_etl(step, slices=None, max_workers=MAX_WORKERS):
 
 
 def post_process():
-    with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
-        sqlite3_settings(connection)
+    with sqlite_connect() as connection:
         post_process_redirects(connection)
 
 
@@ -380,17 +371,15 @@ def init_schema():
     if Path(OLTP_DB_FILE_NAME).exists():
         print(f"Database {OLTP_DB_FILE_NAME} already exists, skipping schema init.")
         return
-    with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
-        sqlite3_settings(connection)
-        for file_name in ["sql/create_oltp_tables.sql", "sql/create_oltp_indices.sql"]:
+    with sqlite_connect() as connection:
+        for file_name in ["sql/create_oltp_tables.sql"]:
             with open(file_name) as file:
                 connection.executescript(file.read())
 
 
 def update_schema():
-    with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
-        sqlite3_settings(connection)
-        for file_name in ["sql/create_fts_tables.sql"]:
+    with sqlite_connect() as connection:
+        for file_name in ["sql/create_oltp_indices.sql", "sql/create_fts_tables.sql"]:
             with open(file_name) as file:
                 connection.executescript(file.read())
 
