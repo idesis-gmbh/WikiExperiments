@@ -26,7 +26,7 @@ flowchart TD
     D --> C
     C --> E[Post-process\nredirect text]
     E --> C
-    C --> F[FTS index build\nunicode61 tokenizer]
+    C --> F[FTS index build\ntrigram tokenizer]
     F --> C
     C --> G[OLAP transfer]
     G --> H[(wiki-olap.db\nDuckDB)]
@@ -39,7 +39,7 @@ flowchart TD
 
 **1. ETL (`etl.py`)** — Parses a Wikipedia multistream dump in two passes. The index file locates compressed blocks in the data file, which are decompressed and parsed as XML using `mwparserfromhell`. Pass 1 loads all pages into SQLite, storing lead paragraph text in a separate `internal_texts` table deduplicated by hash. Pass 2 loads internal links, external links, and redirects. Both passes run in parallel using `ProcessPoolExecutor`. A post-processing step propagates lead text from redirect targets back to redirect source pages, ensuring redirect pages are searchable. Finally, `update_schema()` builds two FTS5 virtual tables: `internal_texts_fts` over lead text content, and `internal_pages_fts` over page titles.
 
-**2. PageRank (`pr.py`)** — Copies the SQLite tables into DuckDB for analytical processing, then computes PageRank iteratively in SQL across both article pages (NS 0) and category pages (NS 14). A ping-pong buffer alternates between two rank columns (`rank1`, `rank2`) to ensure all source ranks within a single iteration are consistent. After convergence, each article's rank is augmented by the rank of its corresponding category page, combining the article-level and category-level importance signals. Results are written back to SQLite. For comparison, PageRank can also be run directly against the SQLite database.
+**2. PageRank (`pr.py`, `pr_nx.py`)** — `pr.py` copies the SQLite tables into DuckDB for analytical processing, then computes PageRank iteratively in SQL across both article pages (NS 0) and category pages (NS 14). A ping-pong buffer alternates between two rank columns (`rank1`, `rank2`) to ensure all source ranks within a single iteration are consistent. Results are written back to SQLite. For comparison, PageRank can also be run directly against the SQLite database. `pr_nx.py` provides a NetworkX alternative that loads the full graph into memory — competitive with DuckDB on smaller corpora but unsuitable for full English Wikipedia on typical hardware due to memory constraints.
 
 **3. Search (`search.py`)** — Queries the SQLite database using two parallel FTS streams: one over page titles (`internal_pages_fts`) and one over lead text (`internal_texts_fts`). Before querying, each stream filters out high-frequency terms using IDF scores from the FTS vocabulary tables. The two result sets are merged and re-ranked by a normalised weighted combination of BM25 and PageRank. Redirects are resolved transparently so that a search for "Einstein" returns the Albert Einstein article even if the matching page is a redirect.
 
@@ -75,34 +75,35 @@ external_links        — links from internal pages to external URLs
 
 internal_texts_fts    — FTS5 virtual table over internal_texts
                         (content table, backed by internal_texts,
-                         unicode61 tokenizer with diacritic removal)
+                         trigram tokenizer — enables substring matching
+                         at the cost of a larger index and slower build)
 
 internal_pages_fts    — FTS5 virtual table over internal_pages titles
                         (content table, backed by internal_pages,
-                         unicode61 tokenizer with diacritic removal)
+                         trigram tokenizer — enables substring matching
+                         at the cost of a larger index and slower build)
 ```
 
 Separating lead texts into `internal_texts` keeps `internal_pages` narrow. Since PageRank iterates over `internal_pages` repeatedly but never touches text, this has a measurable effect on SQLite performance: removing the wide `text` column from `internal_pages` reduced SQLite PageRank runtime by roughly 6x, from ~4150s to ~705s, even though the PageRank queries themselves are unchanged. DuckDB is unaffected because it already excluded the text column during the OLAP transfer.
 
+The trigram tokenizer is used by default because it produces meaningfully better search quality than the unicode61 tokenizer — it enables substring matching and improves nDCG@10 noticeably on the SemSearch_ES benchmark. The trade-off is a substantially larger FTS index and a slower build: on Simple English Wikipedia the FTS build takes ~200s with trigram vs ~18s with unicode61, and on full English Wikipedia it takes ~2 hours. Users who do not need search can skip the FTS build entirely; users who prioritise index size over search quality can switch to `unicode61 remove_diacritics 2` in `create_fts_tables.sql`.
+
 The external link tables capture the full outbound link graph of Wikipedia. As an example of what this enables: roughly 20% of all external links in Simple English Wikipedia point to the Wayback Machine (web.archive.org), making external domain analysis a natural candidate for future trust and source quality work.
 
-## PageRank — Namespace Handling
+## Performance — PageRank Engine Comparison
 
-PageRank is computed jointly over article pages (NS 0) and category pages (NS 14). After convergence, the rank of each category page is added to the rank of the corresponding article page (e.g. the rank of `Category:Mathematics` is added to the rank of `Mathematics`). This gives each article a combined score that reflects both its own link importance and the importance of its position in the category hierarchy — a useful signal for distinguishing broad foundational topics from narrow ones.
-
-Running PageRank over NS 0 alone (ignoring categories) is also supported and can be used for comparison. The choice of namespace configuration is controlled by the `ns` parameter passed to `run_page_rank_olap()` and `run_page_rank_oltp()` in `pr.py`.
-
-## Performance — SQLite vs DuckDB
-
-One of the goals of this project is to compare SQLite and DuckDB as execution engines for an iterative analytical SQL workload. PageRank is a good benchmark: each iteration consists of several aggregation-heavy SQL statements over a large graph, repeated until convergence.
+One of the goals of this project is to compare different execution engines for an iterative analytical workload. PageRank is a good benchmark: each iteration consists of several aggregation-heavy operations over a large graph, repeated until convergence. Three engines are supported: NetworkX (in-memory Python graph library), SQLite, and DuckDB.
 
 ### Results — Simple English Wikipedia
 
 | Stage | Time |
 |-------|------|
 | ETL pass 1 (pages + lead text) | ~210s |
-| ETL pass 2 (links) | ~630s |
-| PageRank — DuckDB (28 iterations) | ~13s |
+| ETL pass 2 (links) | ~420s |
+| Post-process (redirects) | ~3s |
+| FTS index build | ~210s |
+| PageRank — NetworkX (28 iterations) | ~24s |
+| PageRank — DuckDB (28 iterations) | ~24s |
 | PageRank — SQLite (28 iterations) | ~720s |
 
 | Database | Size |
@@ -111,26 +112,31 @@ One of the goals of this project is to compare SQLite and DuckDB as execution en
 | SQLite (simplewiki-oltp.db) | ~1.2 GB |
 | DuckDB (simplewiki-olap.db) | ~100 MB |
 
-DuckDB computes 28 iterations in 13 seconds — roughly **54x faster** than SQLite for the same workload. Both engines converge in exactly 28 iterations with numerically equivalent results, confirming correctness.
+On Simple English Wikipedia all three engines converge in exactly 28 iterations with numerically equivalent results. NetworkX and DuckDB are comparable in runtime (~24s each); SQLite is roughly **30x slower** due to its row-oriented storage and the overhead of repeated aggregations over large tables.
 
 The DuckDB database is also **12x smaller** than the SQLite equivalent. The OLAP transfer excludes the `text_id` column and the `internal_texts` table entirely since PageRank does not use them, keeping the DuckDB database compact and the transfer fast.
 
-### Results — Full English Wikipedia (estimated)
+The key difference between NetworkX and DuckDB becomes apparent at scale: NetworkX loads the entire graph into memory as Python objects, so memory consumption scales directly with graph size. DuckDB operates out of core via its buffer pool, processing data that exceeds available RAM. On Simple English Wikipedia both approaches fit comfortably in memory; on full English Wikipedia NetworkX requires more RAM than is available on typical hardware.
+
+### Results — Full English Wikipedia
 
 | Stage | Time |
 |-------|------|
-| ETL pass 1 (pages + lead text) | ~3 hrs |
-| ETL pass 2 (links) | ~9 hrs |
-| PageRank — DuckDB | ~10 min |
-| PageRank — SQLite | ~days |
+| ETL pass 1 (pages + lead text) | ~4 hrs |
+| ETL pass 2 (links) | ~7 hrs |
+| Post-process (redirects) | ~10 min |
+| FTS index build | ~2 hrs |
+| PageRank — DuckDB | ~31 min |
+| PageRank — NetworkX | exceeds RAM |
+| Results transfer | ~4 min |
 
 | Database | Size |
 |----------|------|
 | Wikipedia Archive | ~25 GB |
-| SQLite (simplewiki-oltp.db) | ~60 GB |
-| DuckDB (simplewiki-olap.db) | ~5 GB |
+| SQLite (enwiki-oltp.db) | ~90 GB |
+| DuckDB (enwiki-olap.db) | ~6 GB |
 
-The 54x DuckDB speedup makes the difference between a PageRank run that takes minutes and one that would take days — a compelling case for columnar databases in iterative graph analytics.
+The total pipeline run from scratch takes roughly 14 hours. The 90 GB SQLite figure reflects the trigram FTS index; switching to unicode61 would produce a considerably smaller database. DuckDB's out-of-core execution makes it the only practical engine for PageRank at this scale on typical hardware.
 
 ## Getting Started
 
@@ -141,6 +147,7 @@ The 54x DuckDB speedup makes the difference between a PageRank run that takes mi
 - [Git](https://git-scm.com/)
 - `wget` or `curl` for downloading dumps
 - ~2 GB free disk space (Simple English Wikipedia)
+- ~100 GB free disk space (full English Wikipedia)
 
 ### Installation
 
@@ -183,7 +190,7 @@ WIKI_DATE = "latest"
 WIKI_NAME = "simplewiki"
 ```
 
-For full English Wikipedia, see [dumps.wikimedia.org/enwiki](https://dumps.wikimedia.org/enwiki) — be prepared for significantly larger processing times and disk requirements.
+For full English Wikipedia, see [dumps.wikimedia.org/enwiki](https://dumps.wikimedia.org/enwiki). The compressed dump is approximately 25 GB; be prepared for significantly larger processing times and disk requirements (~100 GB).
 
 **Note:** The pipeline streams and decompresses the dump on the fly — the archive is never fully unpacked to disk. This is particularly significant for the full English Wikipedia, where the uncompressed XML would exceed 200 GB.
 
@@ -225,17 +232,7 @@ Adjust `MAX_WORKERS` in `config.py` to match your CPU core count:
 MAX_WORKERS = 8  # default
 ```
 
-Expected runtimes on Simple English Wikipedia:
-
-| Stage | Time |
-|-------|------|
-| Schema initialisation | ~0.1s |
-| ETL pass 1 (pages + lead text) | ~210s |
-| ETL pass 2 (links) | ~630s |
-| Post-process (redirects) | ~1s |
-| FTS index build | ~18s |
-| PageRank (DuckDB) | ~13s |
-| Results transfer | ~2s |
+See the [Performance](#performance--pagerank-engine-comparison) section for expected runtimes on both Simple and full English Wikipedia.
 
 ### Searching
 
@@ -285,6 +282,8 @@ wikiexperiments/
 ├── main.py          # pipeline orchestrator
 ├── etl.py           # ETL: parse Wikipedia dump, load into SQLite, build FTS index
 ├── pr.py            # PageRank: transfer to DuckDB, compute ranks, write back
+├── pr_nx.py         # PageRank: NetworkX alternative (in-memory, simplewiki only)
+├── db.py            # database connections: SQLite and DuckDB context managers
 ├── search.py        # search: two-stream BM25 × PageRank ranked full-text search
 ├── ndcg.py          # evaluation: nDCG@10 against DBpedia-Entity v2 SemSearch_ES
 ├── explore.py       # inspect results: top pages, degree distribution, shortest path

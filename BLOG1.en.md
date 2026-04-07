@@ -1,0 +1,82 @@
+# What Does Wikipedia Really Know? PageRank, SQL, and a Surprising Beetle
+
+Wikipedia is the largest human-curated knowledge base in the world. Millions of articles, hundreds of millions of internal links — and right in the middle of it, a question that wouldn't let us go: which articles actually form the backbone of this knowledge network?
+
+To find out, we applied PageRank to the English Wikipedia — the same algorithm Google once used to sort the web. The results were revealing. And in one place, quite unexpected.
+
+## PageRank: Importance Through Links
+
+PageRank was developed by Larry Page and Sergey Brin to rank web pages by their significance. The core idea is elegant: a page is important if many important pages link to it. Importance propagates through the network iteratively until the values stabilise.
+
+Wikipedia is a natural fit for this analysis. Its internal links are set by editors, topically meaningful, and free from commercial distortions. With millions of articles, the dataset is also large enough to make computational choices genuinely matter. The idea isn't new — [Nayuki implemented a similar approach in Java](https://www.nayuki.io/page/computing-wikipedias-internal-pageranks), and [Thalhammer & Rettinger examined in an academic study](https://www.uni-trier.de/fileadmin/fb2/LDV/Rettinger/publications/Wikipedia_pagerank1.pdf) how different link types influence rankings. Our approach differs primarily in the choice of tools: pure SQL, no external graph processor, and a direct database comparison as an explicit goal.
+
+## The Pipeline: ETL in Two Passes
+
+Wikipedia makes its content available as compressed XML dumps. We built a pipeline that processes this dump in two parallel passes using `ProcessPoolExecutor`: first all pages are loaded, then internal links, external links, and redirects. The result lands in a SQLite database — without ever fully unpacking the compressed dump. For the full English Wikipedia, that would be over 200 GB uncompressed; the pipeline streams the dump directly.
+
+## PageRank in Pure SQL
+
+The actual computation runs entirely in SQL — no Python loop, no external graph processor. Each iteration executes four SQL statements: rank reset, propagation through linked pages, handling of unlinked pages, and finally the damping factor correction.
+
+One detail we particularly like: instead of creating a new temporary table each iteration, we use a ping-pong buffer between two columns (`rank1` and `rank2`). This ensures consistent source values within a single iteration and avoids the overhead of creating and indexing temporary tables.
+
+```sql
+WITH connected_page_ranks AS (
+    SELECT target_id, SUM(rank1 / out_degree) AS rank
+    FROM internal_pages
+    INNER JOIN internal_links ON source_id = id
+    GROUP BY target_id
+)
+UPDATE internal_pages
+SET rank2 = internal_pages.rank2 + connected_page_ranks.rank
+FROM connected_page_ranks
+WHERE internal_pages.id = connected_page_ranks.target_id;
+```
+
+After 21 iterations the algorithm converges — the maximum ranking difference between two passes falls below 1e-6.
+
+## SQLite vs. DuckDB: A 50x Speed Difference
+
+PageRank is an analytically intensive workload: many aggregations over large datasets, many repetitions. That makes it an informative benchmark for choosing a database engine.
+
+We ran the same algorithm against both SQLite and DuckDB:
+
+| Engine | Time (21 iterations) |
+|--------|----------------------|
+| SQLite | ~510 seconds |
+| DuckDB | ~10 seconds |
+
+DuckDB is **50 times faster** — with numerically identical results. The database is also 20 times smaller, thanks to columnar storage and compression. For the full English Wikipedia, that's the difference between a run that takes hours and one that takes minutes. This aligns with what independent benchmarks show: [DuckDB dominates analytical workloads against SQLite](https://www.lukas-barth.net/blog/sqlite-duckdb-benchmark/) — the difference lies in vectorised execution and the column-oriented storage format optimised for aggregations over large datasets.
+
+## The Results: What Wikipedia Considers Important
+
+The top articles by PageRank read like a cross-section of collective human knowledge:
+
+| Rank | Article |
+|------|---------|
+| 1 | United States |
+| 2 | The New York Times |
+| 3 | World War II |
+| 4 | France |
+| 5 | List of sovereign states |
+| 6 | Germany |
+| 7 | New York City |
+| 8 | India |
+| 9 | Russia |
+| 10 | London |
+
+Major powers, global media, historical turning points — that seems plausible. Then rank 13:
+
+**Cerambycidae.**
+
+A family of beetles. Sitting between World War II and *The Guardian*. This surprised us at first — and has a satisfying explanation: Wikipedia contains hundreds of thousands of automatically generated stub articles on insect species, many of which link back to their parent family. PageRank measures link structure, not relevance in the human sense — and that's precisely what makes these outliers valuable data points.
+
+## Conclusion
+
+This project shows what becomes possible when you treat Wikipedia as raw material for your own analysis: a large-scale ETL pipeline, SQL as a fully capable language for iterative graph algorithms, and a direct performance comparison between two database engines on a real workload.
+
+The choice of the right technology is not an academic question — it's the difference between an experiment that runs and one that waits.
+
+---
+
+*Curious? The project is open source: [github.com/idesis-gmbh/wikiexperiments](https://github.com/idesis-gmbh/wikiexperiments)*

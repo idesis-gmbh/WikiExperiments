@@ -13,6 +13,8 @@ CREATE TABLE internal_texts (
     PRIMARY KEY(id)
 );
 
+CREATE INDEX internal_texts_hash ON internal_texts(hash);
+
 CREATE TABLE internal_pages (
     id INTEGER,
     ns INTEGER,

@@ -2,12 +2,12 @@ from collections import defaultdict
 import math
 import sqlite3
 
-from config import OLTP_DB_FILE_NAME
 from search import search_query
+from db import sqlite_connect
 
 
 def search_title(title):
-    with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
+    with sqlite_connect() as connection:
         cursor = connection.cursor()
         pages = cursor.execute(
             """
@@ -17,6 +17,7 @@ def search_title(title):
             """,
             (title[9:-1].replace("_", " "),),
         ).fetchall()
+        connection.commit()
         return bool(pages)
 
 
@@ -78,7 +79,9 @@ def evaluate():
             )
             # print(resolvable_qrels)
             answer["qrels"] = resolvable_qrels
-            match_titles, match_texts, items = search_query(query, k=k)
+            match_titles, match_texts, items = search_query(
+                query, k=k, title_weight=1, text_weight=1, alpha=0.5
+            )
             answer["match_titles"] = match_titles
             answer["match_texts"] = match_texts
             answer["items"] = items
@@ -106,7 +109,7 @@ def evaluate():
             this_ndcg = ndcg(answer_qrels, resolvable_qrels, k=k)
             sum_ndcg += this_ndcg
             print("ndcg", this_ndcg, file=log_file)
-    print("mean ndcg", sum_ndcg / count_ndcg)
+        print("mean ndcg", sum_ndcg / count_ndcg)
 
 
 if __name__ == "__main__":

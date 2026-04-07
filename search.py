@@ -1,9 +1,8 @@
 import math
 from pprint import pprint
-import sqlite3
 import sys
 
-from config import OLTP_DB_FILE_NAME
+from db import sqlite_connect
 
 
 def shorten_text(text):
@@ -44,19 +43,18 @@ def fts5_escape(query, n=100):
     # return f'"{escaped}"'
 
 
-def search_query_order(minimum_bm25, bm25, maximum_rank, rank):
+def search_query_order(minimum_bm25, bm25, maximum_rank, rank, alpha):
     # assert bm25 * rank >= minimum_bm25 * maximum_rank
     # return bm25 * rank
     norm_bm25 = -bm25 / minimum_bm25
     norm_rank = -rank / maximum_rank
-    alpha = 0.6
     return alpha * norm_bm25 + (1 - alpha) * norm_rank
 
 
-def search_query(query, k=10):
+def search_query(query, k=10, title_weight=1, text_weight=1, alpha=0.5):
     pages = []
-    with sqlite3.connect(OLTP_DB_FILE_NAME) as connection:
-        connection.create_function("search_query_order", 4, search_query_order)
+    with sqlite_connect() as connection:
+        connection.create_function("search_query_order", 5, search_query_order)
         doc_count = get_doc_count(connection, "internal_texts")
         match_titles = fts5_escape(
             filter_query(connection, "internal_pages", doc_count, query)
@@ -69,7 +67,7 @@ def search_query(query, k=10):
             """
             WITH title_candidates AS (
                 SELECT p.id, p.ns, p.title, t.text,
-                    5 * bm25(internal_pages_fts) AS bm25, p.rank1 AS rank1
+                    ? * bm25(internal_pages_fts) AS bm25, p.rank1 AS rank1
                 FROM internal_pages p
                 INNER JOIN internal_pages_fts pfts ON pfts.rowid = p.id
                 INNER JOIN internal_texts t ON t.id = p.text_id
@@ -78,7 +76,7 @@ def search_query(query, k=10):
             ),
             text_candidates AS (
                 SELECT p.id, p.ns, p.title, t.text,
-                    bm25(internal_texts_fts) AS bm25, p.rank1 AS rank1 
+                    ? * bm25(internal_texts_fts) AS bm25, p.rank1 AS rank1 
                 FROM internal_pages p
                 INNER JOIN internal_texts t ON t.id = p.text_id
                 INNER JOIN internal_texts_fts tfts ON tfts.rowid = t.id
@@ -118,9 +116,9 @@ def search_query(query, k=10):
             FROM redirect_candidates
             CROSS JOIN extrema
             -- WHERE bm25 < .5 * minimum_bm25
-            ORDER BY search_query_order(minimum_bm25, bm25, maximum_rank, rank)
+            ORDER BY search_query_order(minimum_bm25, bm25, maximum_rank, rank, ?)
             """,
-            (match_titles, match_texts, 10 * k),
+            (title_weight, match_titles, text_weight, match_texts, 10 * k, alpha),
         ).fetchall()
         lookup = set()
         pages = []
@@ -144,6 +142,9 @@ def search_query(query, k=10):
 if __name__ == "__main__":
     if len(sys.argv) > 2:
         with open(sys.argv[2], "w", encoding="utf-8") as log_file:
-            pprint(search_query(sys.argv[1]), log_file)
+            pprint(
+                search_query(sys.argv[1], title_weight=1, text_weight=1, alpha=0.5),
+                log_file,
+            )
     elif len(sys.argv) > 1:
-        pprint(search_query(sys.argv[1]))
+        pprint(search_query(sys.argv[1], title_weight=1, text_weight=1, alpha=0.5))
