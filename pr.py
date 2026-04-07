@@ -36,22 +36,24 @@ def page_rank(connection, ns):
     ns_placeholders = ", ".join("?" * len(ns))
     cursor.execute(
         f"""
-        UPDATE internal_pages
+        UPDATE internal_pages 
         SET in_degree = (
             SELECT COUNT(*)
-            FROM internal_links
-            WHERE internal_links.target_id = internal_pages.id
+            FROM internal_links l
+            INNER JOIN internal_pages s ON s.id = l.source_id
+            WHERE l.target_id = internal_pages.id AND s.ns in ({ns_placeholders}) 
         ) , out_degree = (
             SELECT COUNT(*)
-            FROM internal_links
-            WHERE internal_links.source_id = internal_pages.id
+            FROM internal_links l
+            INNER JOIN internal_pages t ON t.id = l.target_id
+            WHERE l.source_id = internal_pages.id AND t.ns in ({ns_placeholders})
         ), rank1 = 1.0 / (
             SELECT COUNT(*) 
             FROM internal_pages
             WHERE ns IN ({ns_placeholders})
         )
         WHERE ns IN ({ns_placeholders})""",
-        ns * 2,
+        ns * 4,
     )
 
     for index in range(MAX_ITERATIONS):
@@ -132,10 +134,11 @@ def page_rank(connection, ns):
         connection.commit()
 
 
-def run_page_rank_oltp(ns):
+def run_page_rank_oltp(nss):
     start = time.time()
     with sqlite_connect() as connection:
-        page_rank(connection, ns)
+        for ns in nss:
+            page_rank(connection, [ns])
     end = time.time()
     print(f"Pagerank computed: {end - start:.2f} seconds")
 
@@ -190,11 +193,12 @@ def transfer_results(oltp_db_file_name=OLTP_DB_FILE_NAME):
         connection.commit()
 
 
-def run_page_rank_olap(ns):
+def run_page_rank_olap(nss):
     start = time.time()
     create_olap_db()
     with duckdb_connect() as connection:
-        page_rank(connection, ns)
+        for ns in nss:
+            page_rank(connection, [ns])
     end = time.time()
     print(f"Pagerank computed: {end - start:.2f} seconds")
     start = time.time()
