@@ -1,6 +1,6 @@
 from collections import deque
 
-from db import sqlite_connect
+from db import duckdb_connect, sqlite_connect
 
 
 def shortest_path(source_title, target_title):
@@ -9,7 +9,7 @@ def shortest_path(source_title, target_title):
 
         def get_id(title):
             row = connection.execute(
-                "SELECT id FROM internal_pages WHERE title = ?", (title,)
+                "SELECT id FROM internal_pages WHERE ns = 0 AND title = ?", (title,)
             ).fetchone()
             return row[0] if row else None
 
@@ -63,16 +63,24 @@ def redirect_statistics():
     print("\n--- Redirect statistics ---")
     with sqlite_connect() as connection:
         total = connection.execute("SELECT COUNT(*) FROM internal_pages").fetchone()[0]
+        content_and_redirects = connection.execute(
+            "SELECT COUNT(*) FROM internal_pages WHERE ns = 0"
+        ).fetchone()[0]
+        categories = connection.execute(
+            "SELECT COUNT(*) FROM internal_pages WHERE ns = 14"
+        ).fetchone()[0]
         redirects = connection.execute("SELECT COUNT(*) FROM redirects").fetchone()[0]
-        content = total - redirects
-        print(f"  Total pages:    {total:>8}")
-        print(f"  Content pages:  {content:>8}  ({100 * content / total:.1f}%)")
-        print(f"  Redirects:      {redirects:>8}  ({100 * redirects / total:.1f}%)")
+        content = content_and_redirects - redirects
+        assert content + categories + redirects == total
+        print(f"  Total pages:      {total:>8}")
+        print(f"  Content pages:    {content:>8}  ({100 * content / total:.1f}%)")
+        print(f"  Category pages:   {categories:>8}  ({100 * categories / total:.1f}%)")
+        print(f"  Redirects:        {redirects:>8}  ({100 * redirects / total:.1f}%)")
 
 
 def degree_distribution():
     print("\n--- Degree distribution ---")
-    with sqlite_connect() as connection:
+    with duckdb_connect() as connection:
         for degree_column in ("in_degree", "out_degree"):
             print(f"\n  {degree_column}:")
             result = connection.execute(
@@ -89,25 +97,28 @@ def degree_distribution():
                     END AS bucket,
                     COUNT(*) AS pages
                 FROM internal_pages
+                WHERE ns = 0 
                 GROUP BY bucket
                 ORDER BY MIN({degree_column})
                 """
             )
             for bucket, count in result.fetchall():
-                bar = "█" * min(count // 1000, 50)
+                bar = "█" * min(count // 100_000, 50)
                 print(f"    {bucket:>8} links: {count:>8} pages  {bar}")
 
 
-def top_pages_by_pagerank(n=20):
+def top_pages_by_pagerank(ns, n=20):
     print(f"\n--- Top {n} pages by PageRank ---")
     with sqlite_connect() as connection:
         result = connection.execute(
-            f"""
+            """
             SELECT title, rank1
             FROM internal_pages
+            WHERE ns = ?
             ORDER BY rank1 DESC
-            LIMIT {n}
-            """
+            LIMIT ?
+            """,
+            (ns, n),
         )
         for rank, (title, score) in enumerate(result.fetchall(), 1):
             print(f"  {rank:>3}. {title:<50} {score:.6f}")
@@ -117,4 +128,5 @@ if __name__ == "__main__":
     shortest_path("Mathematics", "Adolf Hitler")
     degree_distribution()
     redirect_statistics()
-    top_pages_by_pagerank()
+    top_pages_by_pagerank(0)
+    top_pages_by_pagerank(14)
