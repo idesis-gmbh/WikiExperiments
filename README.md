@@ -250,9 +250,7 @@ uv run search.py "your query" logs/query.log
 
 The search engine runs two parallel FTS streams — one over page titles, one over lead text — each with IDF-based stopword filtering to suppress high-frequency terms before querying. The two result sets are merged and re-ranked by a normalised weighted combination of BM25 and PageRank, with redirect resolution applied transparently.
 
-The focus is on keyword search rather than semantic similarity: queries are matched against indexed terms directly, without embeddings or query expansion. This makes the system fast and interpretable, and well suited to the kind of entity-oriented queries (names, concepts, proper nouns) that dominate Wikipedia navigation.
-
-The ranking has not yet been evaluated against full English Wikipedia. On Simple English Wikipedia, mean nDCG@10 is approximately 0.4 against the resolvable subset of the SemSearch_ES queries from DBpedia-Entity v2 [Hasibi et al., SIGIR 2017](https://github.com/iai-group/DBpedia-Entity) — a keyword-oriented entity retrieval benchmark. This figure should be treated as a reproducible development baseline rather than an absolute quality claim: Simple English Wikipedia covers only a fraction of the entities in the DBpedia-Entity qrels, and the corpus mismatch makes direct comparison with full-corpus results inappropriate.
+The focus is on keyword search rather than semantic similarity: queries are matched against indexed terms directly, without embeddings or query expansion. This makes the system fast and interpretable, and well suited to the kind of entity-oriented queries (names, concepts, proper nouns) that dominate Wikipedia navigation. On full English Wikipedia, mean nDCG@10 is 0.37 against the SemSearch_ES queries from DBpedia-Entity v2 [Hasibi et al., SIGIR 2017](https://github.com/iai-group/DBpedia-Entity) — a keyword-oriented entity retrieval benchmark.
 
 ### Inspecting Results
 
@@ -306,8 +304,6 @@ wikiexperiments/
 ```
 
 ## Future Work
-
-**Search evaluation against full English Wikipedia** — the evaluation harness in `ndcg.py` runs against the SemSearch_ES subset of DBpedia-Entity v2 ([Hasibi et al., SIGIR 2017](https://github.com/iai-group/DBpedia-Entity)), a keyword-oriented entity retrieval benchmark. On Simple English Wikipedia the mean nDCG@10 is approximately 0.4 against the resolvable qrels, serving as a development baseline. Running the full pipeline against English Wikipedia and evaluating against the complete DBpedia-Entity v2 qrels would yield a meaningful absolute score and enable direct comparison with published retrieval systems.
 
 **External link trust and source quality** — the ETL pipeline captures the full external link graph, including domain and TLD information via `tldextract`. Initial analysis shows that a substantial fraction of all external links point to archival sources (e.g. the Wayback Machine). A systematic analysis of the external link graph could yield a network of source trust or citation quality, complementing the internal PageRank signal.
 
