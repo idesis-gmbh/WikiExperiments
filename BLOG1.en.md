@@ -33,24 +33,24 @@ FROM connected_page_ranks
 WHERE internal_pages.id = connected_page_ranks.target_id;
 ```
 
-After 21 iterations the algorithm converges — the maximum ranking difference between two passes falls below 1e-6.
+After around 30 iterations the algorithm converges — the maximum ranking difference between two passes falls below 1e-6.
 
-## SQLite vs. DuckDB: A 50x Speed Difference
+## SQLite vs. DuckDB: A 30x Speed Difference
 
 PageRank is an analytically intensive workload: many aggregations over large datasets, many repetitions. That makes it an informative benchmark for choosing a database engine.
 
 We ran the same algorithm against both SQLite and DuckDB:
 
-| Engine | Time (21 iterations) |
+| Engine | Time (~30 iterations) |
 |--------|----------------------|
-| SQLite | ~510 seconds |
-| DuckDB | ~10 seconds |
+| SQLite | ~720 seconds |
+| DuckDB | ~24 seconds |
 
-DuckDB is **50 times faster** — with numerically identical results. The database is also 20 times smaller, thanks to columnar storage and compression. For the full English Wikipedia, that's the difference between a run that takes hours and one that takes minutes. This aligns with what independent benchmarks show: [DuckDB dominates analytical workloads against SQLite](https://www.lukas-barth.net/blog/sqlite-duckdb-benchmark/) — the difference lies in vectorised execution and the column-oriented storage format optimised for aggregations over large datasets.
+DuckDB is **roughly 30 times faster** — with numerically identical results. The database is also more than 10 times smaller, thanks to columnar storage and compression. For the full English Wikipedia, that's the difference between a run that takes hours and one that takes minutes. This aligns with what independent benchmarks show: [DuckDB dominates analytical workloads against SQLite](https://www.lukas-barth.net/blog/sqlite-duckdb-benchmark/) — the difference lies in vectorised execution and the column-oriented storage format optimised for aggregations over large datasets.
 
 ## The Results: What Wikipedia Considers Important
 
-The top articles by PageRank read like a cross-section of collective human knowledge:
+One design decision shapes the results significantly: which namespaces contribute rank to which. Wikipedia's internal links span article pages (NS 0) and category pages (NS 14), and naively mixing them produces a polluted ranking — infrastructure articles like MediaWiki bubble up because thousands of extension pages cross-link back to them, swamping genuinely important content. The cleaner approach is to compute two independent PageRanks: article links flowing only to articles, category links flowing only to categories. The top articles then read like a genuine cross-section of collective human knowledge:
 
 | Rank | Article |
 |------|---------|
@@ -69,7 +69,7 @@ Major powers, global media, historical turning points — that seems plausible. 
 
 **Cerambycidae.**
 
-A family of beetles. Sitting between World War II and *The Guardian*. This surprised us at first — and has a satisfying explanation: Wikipedia contains hundreds of thousands of automatically generated stub articles on insect species, many of which link back to their parent family. PageRank measures link structure, not relevance in the human sense — and that's precisely what makes these outliers valuable data points.
+A family of beetles. Sitting between *The Guardian* and the National Register of Historic Places. The explanation is the same as for the Register: Wikipedia contains hundreds of thousands of automatically generated stub articles — on insect species, on individually listed historic properties — each of which links back to its parent article. PageRank measures link structure, not relevance in the human sense — and that's precisely what makes these outliers valuable data points.
 
 ## Conclusion
 

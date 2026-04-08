@@ -15,10 +15,10 @@ def page_rank_nx(connection, ns):
     G.add_nodes_from(row[0] for row in rows)
     rows = cursor.execute(
         f"""
-        SELECT il.source_id, il.target_id
-        FROM internal_links il
-        JOIN internal_pages sp ON sp.id = il.source_id AND sp.ns IN ({ns_placeholders})
-        JOIN internal_pages tp ON tp.id = il.target_id AND tp.ns IN ({ns_placeholders})
+        SELECT l.source_id, l.target_id
+        FROM internal_links l
+        JOIN internal_pages s ON s.id = l.source_id AND s.ns IN ({ns_placeholders})
+        JOIN internal_pages t ON t.id = l.target_id AND t.ns IN ({ns_placeholders})
         """,
         ns * 2,
     ).fetchall()
@@ -31,10 +31,11 @@ def page_rank_nx(connection, ns):
     connection.commit()
 
 
-def run_page_rank_nx(ns):
+def run_page_rank_nx(nss):
     start = time.time()
     with sqlite_connect() as connection:
-        page_rank_nx(connection, ns)
+        for ns in nss:
+            page_rank_nx(connection, [ns])
     end = time.time()
     print(f"Pagerank computed: {end - start:.2f} seconds")
 

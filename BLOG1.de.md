@@ -33,24 +33,24 @@ FROM connected_page_ranks
 WHERE internal_pages.id = connected_page_ranks.target_id;
 ```
 
-Nach 21 Iterationen konvergiert der Algorithmus – der maximale Rankingunterschied zwischen zwei Durchläufen fällt unter 1e-6.
+Nach etwa 30 Iterationen konvergiert der Algorithmus – der maximale Rankingunterschied zwischen zwei Durchläufen fällt unter 1e-6.
 
-## SQLite vs. DuckDB: 50-facher Geschwindigkeitsunterschied
+## SQLite vs. DuckDB: 30-facher Geschwindigkeitsunterschied
 
 PageRank ist ein analytisch intensiver Workload: viele Aggregationen über große Mengen, viele Wiederholungen. Genau das macht ihn zu einem aufschlussreichen Benchmark für die Wahl der Datenbank-Engine.
 
 Wir haben denselben Algorithmus gegen SQLite und DuckDB laufen lassen:
 
-| Engine | Zeit (21 Iterationen) |
+| Engine | Zeit (~30 Iterationen) |
 |--------|----------------------|
-| SQLite | ~510 Sekunden |
-| DuckDB | ~10 Sekunden |
+| SQLite | ~720 Sekunden |
+| DuckDB | ~24 Sekunden |
 
-DuckDB ist **50-mal schneller** – bei numerisch identischen Ergebnissen. Die Datenbank ist dazu noch 20-mal kleiner, dank spaltenorientierter Speicherung und Kompression. Für die vollständige englische Wikipedia bedeutet das den Unterschied zwischen einem Lauf, der Stunden dauert, und einem, der Minuten braucht. Das deckt sich mit dem, was unabhängige Benchmarks zeigen: [DuckDB dominiert analytische Workloads gegenüber SQLite](https://www.lukas-barth.net/blog/sqlite-duckdb-benchmark/) – der Unterschied liegt in der vektorisierten Ausführung und dem spaltenorientierten Speicherformat, das für Aggregationen über große Datenmengen optimiert ist.
+DuckDB ist **rund 30-mal schneller** – bei numerisch identischen Ergebnissen. Die Datenbank ist dazu noch mehr als 10-mal kleiner, dank spaltenorientierter Speicherung und Kompression. Für die vollständige englische Wikipedia bedeutet das den Unterschied zwischen einem Lauf, der Stunden dauert, und einem, der Minuten braucht. Das deckt sich mit dem, was unabhängige Benchmarks zeigen: [DuckDB dominiert analytische Workloads gegenüber SQLite](https://www.lukas-barth.net/blog/sqlite-duckdb-benchmark/) – der Unterschied liegt in der vektorisierten Ausführung und dem spaltenorientierten Speicherformat, das für Aggregationen über große Datenmengen optimiert ist.
 
 ## Die Ergebnisse: Was Wikipedia für wichtig hält
 
-Die Top-Artikel nach PageRank lesen sich wie ein Schnitt durch das kollektive Weltwissen:
+Eine Entwurfsentscheidung prägt die Ergebnisse erheblich: welche Namensräume Rang an welche weitergeben. Wikipedias interne Links verbinden Artikelseiten (NS 0) mit Kategorieseiten (NS 14), und wer sie naiv mischt, erhält ein verzerrtes Ranking – Infrastrukturartikel wie MediaWiki steigen auf, weil Tausende von Extension-Seiten auf sie zurückverlinken und genuinen Inhalt verdrängen. Der sauberere Ansatz: zwei unabhängige PageRanks, Artikellinks fließen nur zu Artikeln, Kategorielinks nur zu Kategorien. Die Top-Artikel lesen sich dann wie ein echter Schnitt durch das kollektive Weltwissen:
 
 | Rang | Artikel |
 |------|---------|
@@ -69,7 +69,7 @@ Großmächte, globale Medien, historische Zäsuren – das erscheint plausibel. 
 
 **Cerambycidae.**
 
-Eine Käferfamilie. Zwischen Weltkrieg und *The Guardian*. Das überraschte uns zunächst – und hat eine schöne Erklärung: Wikipedia enthält hunderttausende automatisch generierter Stub-Artikel zu Insektenarten, von denen viele auf die übergeordnete Familie zurückverlinken. PageRank misst Verlinkungsstruktur, nicht Relevanz im menschlichen Sinne – und genau das macht solche Ausreißer zu wertvollen Datenpunkten.
+Eine Käferfamilie. Zwischen *The Guardian* und dem National Register of Historic Places. Die Erklärung ist dieselbe wie für das Register: Wikipedia enthält hunderttausende automatisch generierter Stub-Artikel – zu Insektenarten, zu einzeln eingetragenen historischen Bauwerken – von denen jeder auf seinen übergeordneten Artikel zurückverlinkt. PageRank misst Verlinkungsstruktur, nicht Relevanz im menschlichen Sinne – und genau das macht solche Ausreißer zu wertvollen Datenpunkten.
 
 ## Fazit
 
