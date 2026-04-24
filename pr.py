@@ -135,11 +135,11 @@ def page_rank(connection, ns):
 
 
 def run_page_rank_oltp(nss):
-    start = time.time()
+    start = time()
     with sqlite_connect() as connection:
         for ns in nss:
             page_rank(connection, [ns])
-    end = time.time()
+    end = time()
     print(f"Pagerank computed: {end - start:.2f} seconds")
 
 
@@ -194,16 +194,16 @@ def transfer_results(oltp_db_file_name=OLTP_DB_FILE_NAME):
 
 
 def run_page_rank_olap(nss):
-    start = time.time()
+    start = time()
     create_olap_db()
     with duckdb_connect() as connection:
         for ns in nss:
             page_rank(connection, [ns])
-    end = time.time()
+    end = time()
     print(f"Pagerank computed: {end - start:.2f} seconds")
-    start = time.time()
+    start = time()
     transfer_results()
-    end = time.time()
+    end = time()
     print(f"Results transferred: {end - start:.2f} seconds")
 
 

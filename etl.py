@@ -3,7 +3,7 @@ from concurrent.futures import ProcessPoolExecutor, wait, FIRST_COMPLETED, as_co
 import hashlib
 from itertools import islice
 from pathlib import Path
-import time
+from time import time
 import xml.etree.ElementTree as ET
 import mwparserfromhell
 import tldextract
@@ -385,25 +385,25 @@ def update_schema():
 
 
 def run(max_workers=MAX_WORKERS):
-    start = time.time()
+    start = time()
     init_schema()
-    end = time.time()
+    end = time()
     print(f"Initialized schema: {end - start:.2f} seconds")
-    start = time.time()
+    start = time()
     run_parallel_etl(1, max_workers=max_workers)
-    end = time.time()
+    end = time()
     print(f"ETL step 1: {end - start:.2f} seconds")
-    start = time.time()
+    start = time()
     run_parallel_etl(2, max_workers=max_workers)
-    end = time.time()
+    end = time()
     print(f"ETL step 2: {end - start:.2f} seconds")
-    start = time.time()
+    start = time()
     post_process()
-    end = time.time()
+    end = time()
     print(f"Postprocess: {end - start:.2f} seconds")
-    start = time.time()
+    start = time()
     update_schema()
-    end = time.time()
+    end = time()
     print(f"Updated schema: {end - start:.2f} seconds")
 
 

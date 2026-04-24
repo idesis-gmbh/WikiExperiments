@@ -1,6 +1,8 @@
 from collections import defaultdict
+from itertools import groupby
 import math
-import sqlite3
+from pprint import pprint
+from time import time
 
 from search import search_query
 from db import sqlite_connect
@@ -23,9 +25,7 @@ def search_title(title):
 
 def dcg(qrels):
     return sum(
-        rel / math.log2(rank + 1)
-        for rank, (title, rel) in enumerate(qrels, start=1)
-        if rel > 0
+        rel / math.log2(rank + 1) for rank, (title, rel) in enumerate(qrels, start=1)
     )
 
 
@@ -37,80 +37,130 @@ def ndcg(items, qrels, k=10):
     return actual_dcg / ideal_dcg
 
 
-def evaluate():
+def load_qrels(prefix_key):
     qrels = defaultdict(dict)
     with open(
         "data/DBpedia-Entity/collection/v2/qrels-v2.txt", "r", encoding="utf-8"
     ) as in_file:
         for line in in_file:
             key, _, title, relevance = line.strip().split(maxsplit=3)
-            if not key.startswith("SemSearch_ES"):
+            if not key.startswith(prefix_key):
                 continue
             found = search_title(title)
             qrels[key][title] = (int(relevance), found)
             # qrels[key][title] = (int(relevance), None)
+    return qrels
+
+
+def evaluate(
+    qrels,
+    prefix_key,
+    k1=100,
+    k2=10,
+    title_weight=1,
+    text_weight=1,
+    alpha=0.5,
+):
     with (
-        open("logs/answers-v2.log", "w", encoding="utf-8") as log_file,
+        open(
+            f"logs/answers-v2_stopped-{k1}-{title_weight}-{text_weight}-{alpha}.log",
+            "w",
+            encoding="utf-8",
+        ) as log_file,
         open(
             "data/DBpedia-Entity/collection/v2/queries-v2_stopped.txt",
+            # "data/DBpedia-Entity/collection/v2/queries-v2.txt",
             "r",
             encoding="utf-8",
         ) as in_file,
     ):
-        k = 10
         count_ndcg = 0
         sum_ndcg = 0.0
         for line in in_file:
-            answer = {}
             key, query = line.strip().split(maxsplit=1)
-            if not key.startswith("SemSearch_ES"):
+            if not key.startswith(prefix_key):
                 continue
-            answer["key"] = key
-            answer["query"] = query
-            # answer["qrels"] = qrels[key]
+            print("query", key, query, file=log_file)
             resolvable_qrels = sorted(
                 [
                     (title, rel)
                     for title, (rel, found) in qrels[key].items()
                     if found == True
                 ],
-                key=lambda row: row[1],
+                key=lambda row: (row[1], row[0]),
                 reverse=True,
             )
             # print(resolvable_qrels)
-            answer["qrels"] = resolvable_qrels
-            match_titles, match_texts, items = search_query(
-                query, k=k, title_weight=1, text_weight=1, alpha=0.5
-            )
-            answer["match_titles"] = match_titles
-            answer["match_texts"] = match_texts
-            answer["items"] = items
-            for item in answer["items"]:
-                title = f"<dbpedia:{item['title'].replace(' ', '_')}>"
-                if title in qrels[key]:
-                    item["relevance"] = qrels[key][title]
-            answer_qrels = sorted(
-                [
-                    (item["title"], item["relevance"][0])
-                    for item in answer["items"]
-                    if "relevance" in item and item["relevance"][1] == True
-                ],
-                key=lambda row: row[1],
-                reverse=True,
-            )
-            # print(answer_qrels)
-            print("query", query, file=log_file)
-            print(
-                "relevant & found",
-                sum(1 for (title, rel) in resolvable_qrels if rel > 0),
-                file=log_file,
-            )
-            count_ndcg += 1
-            this_ndcg = ndcg(answer_qrels, resolvable_qrels, k=k)
-            sum_ndcg += this_ndcg
-            print("ndcg", this_ndcg, file=log_file)
-        print("mean ndcg", sum_ndcg / count_ndcg)
+            relevant_and_found = sum(1 for (title, rel) in resolvable_qrels if rel > 0)
+            print("relevant & found", relevant_and_found, file=log_file)
+            if relevant_and_found:
+                match_titles, match_texts, items = search_query(
+                    query,
+                    k1=k1,
+                    k2=k2,
+                    title_weight=title_weight,
+                    text_weight=text_weight,
+                    alpha=alpha,
+                )
+                for item in items:
+                    title = f"<dbpedia:{item['title'].replace(' ', '_')}>"
+                    if title in qrels[key]:
+                        item["relevance"] = qrels[key][title]
+                answer_qrels = [
+                    item
+                    for _, group in groupby(
+                        [
+                            (item["title"], item["relevance"][0])
+                            for item in items
+                            if "relevance" in item and item["relevance"][1] == True
+                        ],
+                        key=lambda row: row[1],
+                    )
+                    for item in sorted(group, key=lambda row: row[0])
+                ]
+                # print(answer_qrels)
+                count_ndcg += 1
+                this_ndcg = ndcg(answer_qrels, resolvable_qrels, k=k2)
+                print("ndcg", this_ndcg, file=log_file)
+                if not this_ndcg:
+                    print("resolvable qrels", file=log_file)
+                    pprint(resolvable_qrels, log_file)
+                    print("answer qrels", file=log_file)
+                    pprint(answer_qrels, log_file)
+                sum_ndcg += this_ndcg
+        print("mean ndcg", sum_ndcg / count_ndcg, flush=True)
 
 
 if __name__ == "__main__":
-    evaluate()
+    prefix_key = "SemSearch_ES"
+    # prefix_key = "SemSearch_LS"
+    # prefix_key = "SemSearch"
+    # prefix_key = "QALD2_te"
+    # prefix_key = "QALD2_tr"
+    # prefix_key = ""
+    qrels = load_qrels(prefix_key)
+    """
+    for alpha in [0.8]:
+        evaluate(
+            qrels,
+            prefix_key,
+            k1=200,
+            title_weight=2,
+            alpha=alpha,
+        )
+    exit()
+    """
+    for k1 in [100, 200, 300]:
+        for title_weight in [1, 2, 3]:
+            for alpha in [0.7, 0.8, 0.9]:
+                start = time()
+                print(k1, title_weight, alpha, flush=True)
+                evaluate(
+                    qrels,
+                    prefix_key,
+                    k1=k1,
+                    title_weight=title_weight,
+                    alpha=alpha,
+                )
+                end = time()
+                print(f"Evaluated: {end - start:.2f} seconds")

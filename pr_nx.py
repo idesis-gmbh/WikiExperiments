@@ -1,4 +1,4 @@
-import time
+from time import time
 import networkx as nx
 from config import DAMPING_FACTOR, MAX_ITERATIONS, TOLERANCE
 from db import sqlite_connect
@@ -32,11 +32,11 @@ def page_rank_nx(connection, ns):
 
 
 def run_page_rank_nx(nss):
-    start = time.time()
+    start = time()
     with sqlite_connect() as connection:
         for ns in nss:
             page_rank_nx(connection, [ns])
-    end = time.time()
+    end = time()
     print(f"Pagerank computed: {end - start:.2f} seconds")
 
 
