@@ -47,7 +47,7 @@ END;
 
 CREATE VIRTUAL TABLE internal_texts_vocab_unicode USING fts5vocab(internal_texts_fts_unicode, 'row');
 
-CREATE VIRTUAL TABLE internal_texts_fts_trigram USING fts5(
+/* CREATE VIRTUAL TABLE internal_texts_fts_trigram USING fts5(
     text,
     content='internal_texts',
     content_rowid='id',
@@ -80,7 +80,7 @@ BEGIN
     VALUES (new.id, new.text);
 END;
 
-CREATE VIRTUAL TABLE internal_texts_vocab_trigram USING fts5vocab(internal_texts_fts_trigram, 'row');
+CREATE VIRTUAL TABLE internal_texts_vocab_trigram USING fts5vocab(internal_texts_fts_trigram, 'row'); */
 
 CREATE VIRTUAL TABLE internal_pages_fts_unicode USING fts5(
     title,
@@ -118,7 +118,7 @@ END;
 
 CREATE VIRTUAL TABLE internal_pages_vocab_unicode USING fts5vocab(internal_pages_fts_unicode, 'row');
 
-CREATE VIRTUAL TABLE internal_pages_fts_trigram USING fts5(
+/* CREATE VIRTUAL TABLE internal_pages_fts_trigram USING fts5(
     title,
     content='internal_pages',
     content_rowid='id',
@@ -151,4 +151,4 @@ BEGIN
     VALUES (new.id, new.title, new.text);
 END;
 
-CREATE VIRTUAL TABLE internal_pages_vocab_trigram USING fts5vocab(internal_pages_fts_trigram, 'row');
+CREATE VIRTUAL TABLE internal_pages_vocab_trigram USING fts5vocab(internal_pages_fts_trigram, 'row'); */

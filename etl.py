@@ -65,6 +65,16 @@ def dump_xml(parent, indent=0):
         dump_xml(child, indent + 2)
 
 
+def clean_wikitext(code):
+    for link in code.filter_wikilinks():
+        if link.title.startswith(("File:", "Image:", "file:", "image:")):
+            try:
+                code.remove(link)
+            except ValueError:
+                pass
+    return code.strip_code().strip()
+
+
 # fmt: off
 NS_PREFIXES = {
     "": 0, "Talk": 1,
@@ -148,7 +158,7 @@ def transform_data(data_file_name, offset, step):
         if step == 1 and ns == 0 and not redirection:
             text = page.find("revision").find("text").text
             code = mwparserfromhell.parse(text)
-            lead = str(code.get_sections(include_lead=True)[0]).strip()
+            lead = clean_wikitext(code.get_sections(include_lead=True)[0])
             # assert lead
         else:
             lead = None
@@ -397,10 +407,10 @@ def run(max_workers=MAX_WORKERS):
     run_parallel_etl(2, max_workers=max_workers)
     end = time()
     print(f"ETL step 2: {end - start:.2f} seconds")
-    start = time()
-    post_process()
-    end = time()
-    print(f"Postprocess: {end - start:.2f} seconds")
+    # start = time()
+    # post_process()
+    # end = time()
+    # print(f"Postprocess: {end - start:.2f} seconds")
     start = time()
     update_schema()
     end = time()

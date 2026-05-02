@@ -5,6 +5,8 @@ DATA_DIR = ROOT_DIR / "data"
 
 WIKI_DATE = "latest"
 WIKI_NAME = "simplewiki"
+# WIKI_DATE = "20260301"
+# WIKI_NAME = "enwiki"
 
 INDEX_FILE_NAME = (
     f"{DATA_DIR}/{WIKI_NAME}-{WIKI_DATE}-pages-articles-multistream-index.txt.bz2"
@@ -20,3 +22,9 @@ MAX_WORKERS = 8
 DAMPING_FACTOR = 0.85
 MAX_ITERATIONS = 50
 TOLERANCE = 1e-6
+
+K1 = 100
+K2 = 10
+TITLE_WEIGHT = 2
+TEXT_WEIGHT = 1
+ALPHA = 0.8

@@ -1,6 +1,6 @@
 import csv
 from pathlib import Path
-import time
+from time import time
 
 from config import (
     DAMPING_FACTOR,
