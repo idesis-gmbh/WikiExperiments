@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if query %}{{ query }} - {% endif %}Wiki Search</title>
+  <!--link rel="stylesheet" href="https://cdn.simplecss.org/simple.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/mvp.css"-->
+  <link rel="stylesheet" href="https://unpkg.com/sakura.css/css/sakura.css" >
+</head>
+<body>
+  <header>
+    <h1><a href="/">Wiki Search</a></h1>
+  </header>
+
+  <div class="search-form">
+    <form method="get" action="/">
+      <input type="text" name="q" value="{{ query }}" autofocus placeholder="Search Wikipedia...">
+      <button type="submit">Search</button>
+    </form>
+  </div>
+
+  {% if query %}
+    <p class="result-count">{{ results|length }} result{% if results|length != 1 %}s{% endif %} for <strong>{{ query }}</strong></p>
+    <ul class="results">
+      {% for result in results %}
+      <li>
+        <a href="https://{{ wiki_name }}.wikipedia.org/wiki/{{ result.title | replace(' ', '_') }}" target="_blank">{{ result.title }}</a>
+        <br>
+        <small>{{ result.text }}</small>
+        <br>
+        <small style="color: #999;">bm25 {{ "%.2f"|format(result.bm25) }} · rank {{ "%.2e"|format(result.rank) }}</small>
+      </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <footer>
+    Simple Wikipedia search · BM25 × PageRank
+  </footer>
+</body>
+</html>

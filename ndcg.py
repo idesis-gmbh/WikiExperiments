@@ -2,8 +2,10 @@ from collections import defaultdict
 from itertools import groupby
 import math
 from pprint import pprint
+import sys
 from time import time
 
+from config import K1, K2, TITLE_WEIGHT, TEXT_WEIGHT, ALPHA
 from search import search_query
 from db import sqlite_connect
 
@@ -55,11 +57,11 @@ def load_qrels(prefix_key):
 def evaluate(
     qrels,
     prefix_key,
-    k1=100,
-    k2=10,
-    title_weight=1,
-    text_weight=1,
-    alpha=0.5,
+    k1=K1,
+    k2=K2,
+    title_weight=TITLE_WEIGHT,
+    text_weight=TEXT_WEIGHT,
+    alpha=ALPHA,
 ):
     with (
         open(
@@ -87,10 +89,9 @@ def evaluate(
                     for title, (rel, found) in qrels[key].items()
                     if found == True
                 ],
-                key=lambda row: (row[1], row[0]),
+                key=lambda row: row[1],
                 reverse=True,
             )
-            # print(resolvable_qrels)
             relevant_and_found = sum(1 for (title, rel) in resolvable_qrels if rel > 0)
             print("relevant & found", relevant_and_found, file=log_file)
             if relevant_and_found:
@@ -104,29 +105,17 @@ def evaluate(
                 )
                 for item in items:
                     title = f"<dbpedia:{item['title'].replace(' ', '_')}>"
-                    if title in qrels[key]:
-                        item["relevance"] = qrels[key][title]
-                answer_qrels = [
-                    item
-                    for _, group in groupby(
-                        [
-                            (item["title"], item["relevance"][0])
-                            for item in items
-                            if "relevance" in item and item["relevance"][1] == True
-                        ],
-                        key=lambda row: row[1],
+                    item["relevance"] = (
+                        qrels[key][title] if title in qrels[key] else (0, None)
                     )
-                    for item in sorted(group, key=lambda row: row[0])
-                ]
-                # print(answer_qrels)
+                answer_qrels = [(item["title"], item["relevance"][0]) for item in items]
                 count_ndcg += 1
                 this_ndcg = ndcg(answer_qrels, resolvable_qrels, k=k2)
                 print("ndcg", this_ndcg, file=log_file)
-                if not this_ndcg:
-                    print("resolvable qrels", file=log_file)
-                    pprint(resolvable_qrels, log_file)
-                    print("answer qrels", file=log_file)
-                    pprint(answer_qrels, log_file)
+                print("resolvable qrels", file=log_file)
+                pprint(resolvable_qrels, log_file)
+                print("answer qrels", file=log_file)
+                pprint(answer_qrels, log_file)
                 sum_ndcg += this_ndcg
         print("mean ndcg", sum_ndcg / count_ndcg, flush=True)
 
@@ -139,28 +128,21 @@ if __name__ == "__main__":
     # prefix_key = "QALD2_tr"
     # prefix_key = ""
     qrels = load_qrels(prefix_key)
-    """
-    for alpha in [0.8]:
-        evaluate(
-            qrels,
-            prefix_key,
-            k1=200,
-            title_weight=2,
-            alpha=alpha,
-        )
-    exit()
-    """
-    for k1 in [100, 200, 300]:
-        for title_weight in [1, 2, 3]:
-            for alpha in [0.7, 0.8, 0.9]:
-                start = time()
-                print(k1, title_weight, alpha, flush=True)
-                evaluate(
-                    qrels,
-                    prefix_key,
-                    k1=k1,
-                    title_weight=title_weight,
-                    alpha=alpha,
-                )
-                end = time()
-                print(f"Evaluated: {end - start:.2f} seconds")
+    if len(sys.argv) == 1:
+        for alpha in [0.8, 1]:
+            evaluate(qrels, prefix_key, alpha=alpha)
+    else:
+        for k1 in [50, 100, 150]:
+            for title_weight in [1, 2, 3]:
+                for alpha in [0.7, 0.8, 0.9]:
+                    start = time()
+                    print(k1, title_weight, alpha, flush=True)
+                    evaluate(
+                        qrels,
+                        prefix_key,
+                        k1=k1,
+                        title_weight=title_weight,
+                        alpha=alpha,
+                    )
+                    end = time()
+                    print(f"Evaluated: {end - start:.2f} seconds")

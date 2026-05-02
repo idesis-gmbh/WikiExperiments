@@ -1,10 +1,8 @@
 from collections import deque
-
 from db import duckdb_connect, sqlite_connect
 
 
 def shortest_path(source_title, target_title):
-    print(f"\n--- Shortest path: '{source_title}' → '{target_title}' ---")
     with sqlite_connect() as connection:
 
         def get_id(title):
@@ -32,13 +30,10 @@ def shortest_path(source_title, target_title):
         target_id = get_id(target_title)
 
         if not source_id:
-            print(f"  Page not found: '{source_title}'")
-            return
+            return {"error": f"Page not found: '{source_title}'"}
         if not target_id:
-            print(f"  Page not found: '{target_title}'")
-            return
+            return {"error": f"Page not found: '{target_title}'"}
 
-        # BFS
         queue = deque([[source_id]])
         visited = {source_id}
 
@@ -47,20 +42,20 @@ def shortest_path(source_title, target_title):
             current = path[-1]
 
             if current == target_id:
-                titles = [get_title(pid) for pid in path]
-                print(f"  Path ({len(path) - 1} hops): " + " → ".join(titles))
-                return
+                return {
+                    "path": [get_title(pid) for pid in path],
+                    "hops": len(path) - 1,
+                }
 
             for neighbour in get_neighbours(current):
                 if neighbour not in visited:
                     visited.add(neighbour)
                     queue.append(path + [neighbour])
 
-        print("  No path found.")
+        return {"error": "No path found."}
 
 
 def redirect_statistics():
-    print("\n--- Redirect statistics ---")
     with sqlite_connect() as connection:
         total = connection.execute("SELECT COUNT(*) FROM internal_pages").fetchone()[0]
         content_and_redirects = connection.execute(
@@ -71,19 +66,19 @@ def redirect_statistics():
         ).fetchone()[0]
         redirects = connection.execute("SELECT COUNT(*) FROM redirects").fetchone()[0]
         content = content_and_redirects - redirects
-        assert content + categories + redirects == total
-        print(f"  Total pages:      {total:>8}")
-        print(f"  Content pages:    {content:>8}  ({100 * content / total:.1f}%)")
-        print(f"  Category pages:   {categories:>8}  ({100 * categories / total:.1f}%)")
-        print(f"  Redirects:        {redirects:>8}  ({100 * redirects / total:.1f}%)")
+        return {
+            "total": total,
+            "content": content,
+            "categories": categories,
+            "redirects": redirects,
+        }
 
 
 def degree_distribution():
-    print("\n--- Degree distribution ---")
     with duckdb_connect() as connection:
+        result = {}
         for degree_column in ("in_degree", "out_degree"):
-            print(f"\n  {degree_column}:")
-            result = connection.execute(
+            rows = connection.execute(
                 f"""
                 SELECT
                     CASE
@@ -97,20 +92,20 @@ def degree_distribution():
                     END AS bucket,
                     COUNT(*) AS pages
                 FROM internal_pages
-                WHERE ns = 0 
+                WHERE ns = 0
                 GROUP BY bucket
                 ORDER BY MIN({degree_column})
                 """
-            )
-            for bucket, count in result.fetchall():
-                bar = "█" * min(count // 100_000, 50)
-                print(f"    {bucket:>8} links: {count:>8} pages  {bar}")
+            ).fetchall()
+            result[degree_column] = [
+                {"bucket": bucket, "pages": pages} for bucket, pages in rows
+            ]
+        return result
 
 
 def top_pages_by_pagerank(ns, n=20):
-    print(f"\n--- Top {n} pages by PageRank ---")
     with sqlite_connect() as connection:
-        result = connection.execute(
+        rows = connection.execute(
             """
             SELECT title, rank1
             FROM internal_pages
@@ -119,14 +114,18 @@ def top_pages_by_pagerank(ns, n=20):
             LIMIT ?
             """,
             (ns, n),
-        )
-        for rank, (title, score) in enumerate(result.fetchall(), 1):
-            print(f"  {rank:>3}. {title:<50} {score:.6f}")
+        ).fetchall()
+        return [
+            {"rank": i, "title": title, "score": score}
+            for i, (title, score) in enumerate(rows, 1)
+        ]
 
 
 if __name__ == "__main__":
-    shortest_path("Mathematics", "Adolf Hitler")
-    degree_distribution()
-    redirect_statistics()
-    top_pages_by_pagerank(0)
-    top_pages_by_pagerank(14)
+    from pprint import pprint
+
+    pprint(shortest_path("Mathematics", "Adolf Hitler"))
+    pprint(degree_distribution())
+    pprint(redirect_statistics())
+    pprint(top_pages_by_pagerank(0))
+    pprint(top_pages_by_pagerank(14))
