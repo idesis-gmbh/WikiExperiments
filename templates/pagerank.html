@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Top Pages by PageRank{% endblock %}
+
+{% block content %}
+<h2>Top Pages by PageRank</h2>
+<form method="get" action="/pagerank">
+  <select name="ns">
+    <option value="0" {% if ns == 0 %}selected{% endif %}>Articles</option>
+    <option value="14" {% if ns == 14 %}selected{% endif %}>Categories</option>
+  </select>
+  <button type="submit">Show</button>
+</form>
+
+<table>
+  <thead>
+    <tr><th>#</th><th>Title</th><th>Score</th></tr>
+  </thead>
+  <tbody>
+    {% for p in pages %}
+    <tr>
+      <td>{{ p.rank }}</td>
+      <td><a href="https://{{ wiki_name }}.wikipedia.org/wiki/{{ p.title | replace(' ', '_') }}" target="_blank">{{ p.title }}</a></td>
+      <td><small>{{ "%.2e"|format(p.score) }}</small></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Degree Distribution{% endblock %}
+
+{% block content %}
+<h2>Degree Distribution</h2>
+
+{% for degree_type, buckets in distribution.items() %}
+<h3>{{ degree_type | replace('_', ' ') | title }}</h3>
+<table>
+  <thead>
+    <tr><th>Links</th><th>Pages</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% set max_pages = buckets | map(attribute='pages') | max %}
+    {% for b in buckets %}
+    <tr>
+      <td>{{ b.bucket }}</td>
+      <td>{{ b.pages }}</td>
+      <td>
+        <meter value="{{ b.pages }}" max="{{ max_pages }}" style="width: 200px;"></meter>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endfor %}
+{% endblock %}

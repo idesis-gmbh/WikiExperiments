@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Wiki Search{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.simplecss.org/simple.min.css">
+  <!--link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/mvp.css">
+  <link rel="stylesheet" href="https://unpkg.com/sakura.css/css/sakura.css"-->
+</head>
+<body>
+  <header>
+    <h1><a href="/">Wiki Search</a></h1>
+    <nav>
+      <a href="/">Search</a>
+      <a href="/pagerank">PageRank</a>
+      <a href="/degrees">Degrees</a>
+      <a href="/redirects">Redirects</a>
+      <a href="/path">Shortest Path</a>
+    </nav>
+  </header>
+
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer>
+    Simple Wikipedia search · BMS25 × PageRank
+  </footer>
+</body>
+</html>

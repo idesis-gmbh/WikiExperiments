@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}Shortest Path{% endblock %}
+
+{% block content %}
+<h2>Shortest Path</h2>
+<form method="get" action="/path">
+  <input type="text" name="source" value="{{ source }}" placeholder="Source article">
+  <input type="text" name="target" value="{{ target }}" placeholder="Target article">
+  <button type="submit">Find Path</button>
+</form>
+
+{% if result %}
+  {% if result.error %}
+    <p>{{ result.error }}</p>
+  {% else %}
+    <p>{{ result.hops }} hop{% if result.hops != 1 %}s{% endif %}:</p>
+    <p>
+      {% for title in result.path %}
+        <a href="https://{{ wiki_name }}.wikipedia.org/wiki/{{ title | replace(' ', '_') }}" target="_blank">{{ title }}</a>
+        {% if not loop.last %} → {% endif %}
+      {% endfor %}
+    </p>
+  {% endif %}
+{% endif %}
+{% endblock %}
