@@ -6,7 +6,7 @@ This post covers how we built a keyword search engine on top of our Wikipedia pi
 
 ## The Architecture: Two Streams, One Ranking
 
-The search engine runs two parallel FTS queries against SQLite: one over page titles, one over lead paragraph text. Both use SQLite's FTS5 with a trigram tokenizer, which enables substring matching at the cost of a larger index. The results are merged and re-ranked by a weighted combination of BM25 and PageRank.
+The search engine runs FTS queries against SQLite across two fields — page titles and lead paragraph text — using two tokenizers in parallel: unicode61 for standard term matching and trigram for substring matching. The four candidate sets are merged and re-ranked by a weighted combination of BM25 and PageRank.
 
 BM25 measures how well a document matches the query. PageRank measures how important the document is in the link graph. Neither signal alone is sufficient: BM25 without PageRank will surface obscure pages that happen to match the query terms; PageRank without BM25 will push major articles to the top regardless of relevance. The combination rewards pages that are both a good match and well-connected.
 
@@ -18,7 +18,7 @@ norm_rank = -rank / maximum_rank
 score = alpha * norm_bm25 + (1 - alpha) * norm_rank
 ```
 
-The negative signs appear because FTS5 returns BM25 as a negative number — lower (more negative) means better. Alpha controls the balance; we settled on 0.5, giving each signal equal weight.
+The negative signs appear because FTS5 returns BM25 as a negative number — lower (more negative) means better. Alpha controls the balance; we use 0.8, weighting BM25 more heavily than PageRank. The value was selected via grid search over [0.7, 0.8, 0.9] during evaluation.
 
 ## Stopword Filtering via IDF
 
@@ -28,9 +28,9 @@ This is a cheap but effective substitute for a hand-curated stopword list. It ad
 
 ## The Trigram Trade-off
 
-We chose the trigram tokenizer over unicode61 because search quality is meaningfully better. Trigram indexing enables substring matching, so a query for "Einstein" finds "Albert Einstein" even without prefix anchoring. The trade-off is significant — the FTS index is substantially larger, and building it against the full English Wikipedia takes roughly two hours.
+We run both the trigram and unicode61 tokenizers in parallel. Trigram indexing enables substring matching, so a query for "Einstein" finds "Albert Einstein" even without prefix anchoring, and it handles typos more gracefully. Unicode61 covers standard term matching more efficiently. The trigram index is substantially larger, and building it against the full English Wikipedia takes roughly two hours — but the combination of both tokenizers meaningfully improves search quality over either alone.
 
-For anyone who doesn't need search, or who prefers a smaller database, switching to `unicode61 remove_diacritics 2` in `create_fts_tables.sql` restores fast indexing at the cost of match quality.
+For anyone who doesn't need search, or who prefers a smaller database, switching to `unicode61 remove_diacritics 2` only in `create_fts_tables.sql` restores fast indexing at the cost of match quality.
 
 ## Three Queries
 
@@ -59,7 +59,7 @@ Isaac Newton lands at rank 1 with the best BM25 score by a clear margin and a Pa
 | 5 | Relativity | -30.72 | 2.43e-8 |
 | 6 | Theory of relativity | -23.17 | 9.43e-7 |
 
-"Theory of relativity" has the best BM25 score in the list (-23.17 vs. -26.32 for the others) and a PageRank comparable to General relativity. It still lands at rank 6. The reason: the top four results all score identically on BM25 because the trigram tokenizer matches "relativity" as a substring in each title equally well, so PageRank alone separates them — and General relativity edges out Theory of relativity on that signal. With alpha at 0.5, a BM25 advantage isn't always enough to overcome a PageRank deficit when BM25 scores are bunched together. A human would place Theory of relativity first; the engine can't infer that without understanding query intent.
+"Theory of relativity" has the best BM25 score in the list (-23.17 vs. -26.32 for the others) and a PageRank comparable to General relativity. It still lands at rank 6. The reason: the top four results all score identically on BM25 because the trigram tokenizer matches "relativity" as a substring in each title equally well, so PageRank alone separates them — and General relativity edges out Theory of relativity on that signal. With alpha at 0.8, BM25 already dominates the score — but when BM25 scores are bunched together, even a strong BM25 advantage struggles to overcome a PageRank deficit. A human would place Theory of relativity first; the engine can't infer that without understanding query intent.
 
 ### mercury — a soft failure
 

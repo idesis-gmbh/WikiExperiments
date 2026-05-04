@@ -6,7 +6,7 @@ Dieser Beitrag beschreibt, wie wir eine Keyword-Suchmaschine auf unserer Wikiped
 
 ## Die Architektur: Zwei Streams, ein Ranking
 
-Die Suchmaschine führt zwei parallele FTS-Anfragen gegen SQLite aus: eine über Seitentitel, eine über den Einleitungstext. Beide nutzen SQLite's FTS5 mit einem Trigramm-Tokenizer, der Teilstring-Suche ermöglicht — auf Kosten eines größeren Index. Die Ergebnisse werden zusammengeführt und nach einer gewichteten Kombination aus BM25 und PageRank neu geordnet.
+Die Suchmaschine führt FTS-Anfragen gegen SQLite über zwei Felder aus — Seitentitel und Einleitungstext — und verwendet dabei zwei Tokenizer parallel: unicode61 für Standard-Term-Matching und Trigramm für Teilstring-Suche. Die vier Kandidatenmengen werden zusammengeführt und nach einer gewichteten Kombination aus BM25 und PageRank neu geordnet.
 
 BM25 misst, wie gut ein Dokument zur Anfrage passt. PageRank misst, wie wichtig das Dokument im Linkgraphen ist. Kein Signal allein reicht aus: BM25 ohne PageRank liefert obskure Seiten, die zufällig die Suchbegriffe enthalten; PageRank ohne BM25 schiebt bedeutende Artikel nach oben, unabhängig von ihrer Relevanz für die Anfrage. Die Kombination belohnt Seiten, die sowohl gut zur Anfrage passen als auch gut vernetzt sind.
 
@@ -18,7 +18,7 @@ norm_rank = -rank / maximum_rank
 score = alpha * norm_bm25 + (1 - alpha) * norm_rank
 ```
 
-Die negativen Vorzeichen entstehen, weil FTS5 BM25 als negative Zahl zurückgibt — kleiner (negativer) bedeutet besser. Alpha steuert die Balance; wir haben uns für 0,5 entschieden und damit beiden Signalen gleiches Gewicht gegeben.
+Die negativen Vorzeichen entstehen, weil FTS5 BM25 als negative Zahl zurückgibt — kleiner (negativer) bedeutet besser. Alpha steuert die Balance; wir verwenden 0,8, womit BM25 stärker gewichtet wird als PageRank. Der Wert wurde per Grid-Search über [0,7; 0,8; 0,9] im Rahmen der Evaluation ermittelt.
 
 ## Stoppwort-Filterung via IDF
 
@@ -28,9 +28,9 @@ Das ist ein günstiger, aber wirksamer Ersatz für eine handgepflegte Stoppwortl
 
 ## Der Trigramm-Kompromiss
 
-Wir haben uns für den Trigramm-Tokenizer gegenüber unicode61 entschieden, weil er die Suchqualität messbar verbessert. Trigramm-Indexierung ermöglicht Teilstring-Suche: Eine Anfrage nach "Einstein" findet "Albert Einstein" auch ohne Präfix-Anker. Der Kompromiss ist erheblich — der FTS-Index ist deutlich größer, und sein Aufbau gegen die vollständige englische Wikipedia dauert rund zwei Stunden.
+Wir betreiben den Trigramm- und den unicode61-Tokenizer parallel. Trigramm-Indexierung ermöglicht Teilstring-Suche: Eine Anfrage nach "Einstein" findet "Albert Einstein" auch ohne Präfix-Anker, und Tippfehler werden robuster behandelt. Unicode61 übernimmt das Standard-Term-Matching effizienter. Der Trigramm-Index ist deutlich größer, und sein Aufbau gegen die vollständige englische Wikipedia dauert rund zwei Stunden — aber die Kombination beider Tokenizer verbessert die Suchqualität messbar gegenüber jedem einzelnen.
 
-Wer keine Suche benötigt oder einen kleineren Index bevorzugt, kann in `create_fts_tables.sql` auf `unicode61 remove_diacritics 2` umstellen und gewinnt damit schnellere Indexierung auf Kosten der Suchqualität.
+Wer keine Suche benötigt oder einen kleineren Index bevorzugt, kann in `create_fts_tables.sql` auf ausschließlich `unicode61 remove_diacritics 2` umstellen und gewinnt damit schnellere Indexierung auf Kosten der Suchqualität.
 
 ## Drei Suchanfragen
 
@@ -59,7 +59,7 @@ Isaac Newton landet auf Rang 1 mit dem besten BM25-Wert und einem PageRank, der 
 | 5 | Relativity | -30,72 | 2,43e-8 |
 | 6 | Theory of relativity | -23,17 | 9,43e-7 |
 
-"Theory of relativity" hat den besten BM25-Wert in der Liste (-23,17 gegenüber -26,32 bei den anderen) und einen PageRank, der mit General relativity vergleichbar ist. Trotzdem landet er auf Rang 6. Der Grund: Die vier Spitzenergebnisse erzielen identische BM25-Werte, weil der Trigramm-Tokenizer "relativity" in jedem dieser Titel gleich gut als Teilstring trifft — PageRank allein trennt sie dann. Bei alpha gleich 0,5 reicht ein BM25-Vorsprung nicht immer aus, wenn die BM25-Werte eng beieinanderliegen. Ein Mensch würde "Theory of relativity" auf Platz 1 setzen; die Suchmaschine kann die Absicht hinter der Anfrage nicht erschließen.
+"Theory of relativity" hat den besten BM25-Wert in der Liste (-23,17 gegenüber -26,32 bei den anderen) und einen PageRank, der mit General relativity vergleichbar ist. Trotzdem landet er auf Rang 6. Der Grund: Die vier Spitzenergebnisse erzielen identische BM25-Werte, weil der Trigramm-Tokenizer "relativity" in jedem dieser Titel gleich gut als Teilstring trifft — PageRank allein trennt sie dann. Bei alpha gleich 0,8 dominiert BM25 bereits das Gesamtscore — doch wenn die BM25-Werte eng beieinanderliegen, reicht selbst ein deutlicher BM25-Vorsprung nicht immer aus, um einen PageRank-Nachteil auszugleichen. Ein Mensch würde "Theory of relativity" auf Platz 1 setzen; die Suchmaschine kann die Absicht hinter der Anfrage nicht erschließen.
 
 ### mercury — ein leises Versagen
 

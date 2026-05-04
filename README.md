@@ -6,6 +6,11 @@ Wikipedia is one of the largest and most structured knowledge bases freely avail
 
 The pipeline downloads a Wikipedia dump, extracts pages, links, and lead text into a relational database, builds a full-text search index, and computes PageRank entirely in SQL — first in SQLite, then in DuckDB — making the performance difference directly observable at scale. The resulting database supports both PageRank analysis and ranked full-text search queries.
 
+## Blog Posts
+
+- [What Does Wikipedia Really Know? PageRank, SQL, and a Surprising Beetle](docs/blog1/README.md)
+- [Searching Wikipedia: BM25, PageRank, and the Limits of Both](docs/blog2/README.md)
+
 ## Background — PageRank & Wikipedia
 
 PageRank was originally developed by Larry Page and Sergey Brin to rank web pages by importance. The core intuition is simple: a page is important if many important pages link to it. Importance propagates through the link graph iteratively until it converges.
@@ -250,7 +255,7 @@ uv run search.py "your query" logs/query.log
 
 The search engine runs two parallel FTS streams — one over page titles, one over lead text — each with IDF-based stopword filtering to suppress high-frequency terms before querying. The two result sets are merged and re-ranked by a normalised weighted combination of BM25 and PageRank, with redirect resolution applied transparently.
 
-The focus is on keyword search rather than semantic similarity: queries are matched against indexed terms directly, without embeddings or query expansion. This makes the system fast and interpretable, and well suited to the kind of entity-oriented queries (names, concepts, proper nouns) that dominate Wikipedia navigation. On full English Wikipedia, mean nDCG@10 is 0.37 against the SemSearch_ES queries from DBpedia-Entity v2 [Hasibi et al., SIGIR 2017](https://github.com/iai-group/DBpedia-Entity) — a keyword-oriented entity retrieval benchmark.
+The focus is on keyword search rather than semantic similarity: queries are matched against indexed terms directly, without embeddings or query expansion. This makes the system fast and interpretable, and well suited to the kind of entity-oriented queries (names, concepts, proper nouns) that dominate Wikipedia navigation. On full English Wikipedia, mean nDCG@10 is 0.455 against the SemSearch_ES queries from DBpedia-Entity v2 [Hasibi et al., SIGIR 2017](https://github.com/iai-group/DBpedia-Entity) — a keyword-oriented entity retrieval benchmark.
 
 ### Inspecting Results
 
@@ -296,6 +301,11 @@ wikiexperiments/
 │   └── create_fts_tables.sql    # FTS5 virtual tables (titles + texts) and triggers
 ├── logs/            # gitignored — evaluation output
 │   └── .gitkeep
+├── docs/
+│   ├── blog1/
+│   │   └── README.md    # Blog post 1 (English)
+│   └── blog2/
+│       └── README.md    # Blog post 2 (English)
 └── data/            # gitignored — local data only
     ├── .gitkeep
     ├── wiki-oltp.db             # SQLite database (generated)
