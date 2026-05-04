@@ -10,15 +10,17 @@ PageRank wurde von Larry Page und Sergey Brin entwickelt, um Webseiten nach ihre
 
 Wikipedia eignet sich hervorragend für diese Analyse. Die internen Links sind von Redakteuren gesetzt, inhaltlich bedeutsam und frei von kommerziellen Verzerrungen. Mit Millionen von Artikeln ist der Datensatz zudem groß genug, um rechnerische Entscheidungen wirklich spürbar zu machen. Die Idee ist nicht neu – [Nayuki hat einen ähnlichen Ansatz in Java umgesetzt](https://www.nayuki.io/page/computing-wikipedias-internal-pageranks), und [Thalhammer & Rettinger haben in einer akademischen Studie](https://www.uni-trier.de/fileadmin/fb2/LDV/Rettinger/publications/Wikipedia_pagerank1.pdf) untersucht, wie verschiedene Link-Typen die Rangfolge beeinflussen. Unser Ansatz unterscheidet sich vor allem durch die Wahl der Werkzeuge: reines SQL, kein externer Graph-Prozessor, und ein direkter Datenbankvergleich als explizites Ziel.
 
-## Die Pipeline: ETL in zwei Pässen
+## Die Pipeline: ETL in zwei Schritten
 
-Wikipedia stellt seine Inhalte als komprimierte XML-Dumps zur Verfügung. Wir haben eine Pipeline gebaut, die diesen Dump in zwei parallelen Pässen mit `ProcessPoolExecutor` verarbeitet: zuerst werden alle Seiten geladen, dann interne Links, externe Links und Weiterleitungen. Das Ergebnis landet in einer SQLite-Datenbank – ohne den komprimierten Dump jemals vollständig zu entpacken. Für die englische Wikipedia wäre das unkomprimiert über 200 GB; die Pipeline streamt den Dump direkt.
+Wikipedia stellt seine Inhalte als komprimierte XML-Dumps zur Verfügung. Wir haben eine Pipeline gebaut, die diesen Dump in zwei sequenziellen Schritten verarbeitet: zuerst werden alle Seiten geladen, dann interne Links, externe Links und Weiterleitungen. Jeder Schritt wird intern mit `ProcessPoolExecutor` parallelisiert. Das Ergebnis landet in einer SQLite-Datenbank – ohne den komprimierten Dump jemals vollständig zu entpacken. Für die englische Wikipedia wäre das unkomprimiert über 200 GB; die Pipeline streamt den Dump direkt.
 
 ## PageRank in reinem SQL
 
-Die eigentliche Berechnung läuft vollständig in SQL – kein Python-Loop, kein externer Graph-Prozessor. Pro Iteration werden vier SQL-Statements ausgeführt: Rank-Reset, Weitergabe über verlinkte Seiten, Behandlung von nicht verlinkten Seiten und schließlich die Dämpfungsfaktor-Korrektur.
+Die eigentliche Berechnung läuft vollständig in SQL – kein Python-Loop, kein externer Graph-Prozessor. Da PageRank ein analytisch intensiver Workload ist, kopieren wir die Daten vor der Berechnung von SQLite nach DuckDB und übertragen die Ergebnisse anschließend zurück. Pro Iteration werden vier SQL-Statements ausgeführt: Rank-Reset, Weitergabe über verlinkte Seiten, Behandlung von nicht verlinkten Seiten und schließlich die Dämpfungsfaktor-Korrektur.
 
-Ein Detail, das uns besonders gut gefällt: Statt in jeder Iteration eine neue temporäre Tabelle anzulegen, nutzen wir einen Ping-Pong-Puffer zwischen zwei Spalten (`rank1` und `rank2`). Das sichert konsistente Quellwerte innerhalb einer Iteration und vermeidet den Overhead für Anlage und Indexierung temporärer Tabellen.
+Ein Detail, das uns besonders gut gefällt: Statt in jeder Iteration eine neue temporäre Tabelle anzulegen, nutzen wir einen Ping-Pong-Puffer zwischen zwei Spalten (`rank1` und `rank2`), deren Rollen zu Beginn jeder Runde getauscht werden. Das sichert konsistente Quellwerte innerhalb einer Iteration und vermeidet den Overhead für Anlage und Indexierung temporärer Tabellen.
+
+Der zentrale Weitergabe-Schritt – hier zur Übersichtlichkeit ohne Namespace-Filter dargestellt – sieht so aus:
 
 ```sql
 WITH connected_page_ranks AS (
@@ -50,7 +52,7 @@ DuckDB ist **rund 30-mal schneller** – bei numerisch identischen Ergebnissen. 
 
 ## Die Ergebnisse: Was Wikipedia für wichtig hält
 
-Eine Entwurfsentscheidung prägt die Ergebnisse erheblich: welche Namensräume Rang an welche weitergeben. Wikipedias interne Links verbinden Artikelseiten (NS 0) mit Kategorieseiten (NS 14), und wer sie naiv mischt, erhält ein verzerrtes Ranking – Infrastrukturartikel wie MediaWiki steigen auf, weil Tausende von Extension-Seiten auf sie zurückverlinken und genuinen Inhalt verdrängen. Der sauberere Ansatz: zwei unabhängige PageRanks, Artikellinks fließen nur zu Artikeln, Kategorielinks nur zu Kategorien. Die Top-Artikel lesen sich dann wie ein echter Schnitt durch das kollektive Weltwissen:
+Eine Entwurfsentscheidung prägt die Ergebnisse erheblich: welche Namensräume Rang an welche weitergeben. Wikipedias interne Links verbinden Artikelseiten (NS 0) mit Kategorieseiten (NS 14), und wer sie naiv mischt, erhält ein verzerrtes Ranking – Infrastrukturartikel steigen auf, weil Tausende von Extension-Seiten auf sie zurückverlinken und genuinen Inhalt verdrängen. Der sauberere Ansatz: zwei unabhängige PageRanks, Artikellinks fließen nur zu Artikeln, Kategorielinks nur zu Kategorien. Die Top-Artikel lesen sich dann wie ein echter Schnitt durch das kollektive Weltwissen:
 
 | Rang | Artikel |
 |------|---------|
@@ -64,12 +66,22 @@ Eine Entwurfsentscheidung prägt die Ergebnisse erheblich: welche Namensräume R
 | 8 | India |
 | 9 | Russia |
 | 10 | London |
+| 11 | National Register of Historic Places |
+| 12 | United Kingdom |
+| 13 | Cerambycidae |
+| 14 | The Guardian |
+| 15 | Australia |
+| 16 | U.S. state |
+| 17 | Japan |
+| 18 | China |
+| 19 | Italy |
+| 20 | English language |
 
-Großmächte, globale Medien, historische Zäsuren – das erscheint plausibel. Dann Platz 13:
+Großmächte, globale Medien, historische Zäsuren – das erscheint plausibel. Dann Platz 11 und 13:
 
-**Cerambycidae.**
+**National Register of Historic Places. Cerambycidae.**
 
-Eine Käferfamilie. Zwischen *The Guardian* und dem National Register of Historic Places. Die Erklärung ist dieselbe wie für das Register: Wikipedia enthält hunderttausende automatisch generierter Stub-Artikel – zu Insektenarten, zu einzeln eingetragenen historischen Bauwerken – von denen jeder auf seinen übergeordneten Artikel zurückverlinkt. PageRank misst Verlinkungsstruktur, nicht Relevanz im menschlichen Sinne – und genau das macht solche Ausreißer zu wertvollen Datenpunkten.
+Ein nationales Denkmалverzeichnis und eine Käferfamilie, eingereiht zwischen Weltmächten und großen Tageszeitungen. Beide erklären sich durch dieselbe strukturelle Eigenheit: Wikipedia enthält hunderttausende automatisch generierter Stub-Artikel – zu einzeln eingetragenen historischen Bauwerken, zu Insektenarten – von denen jeder auf seinen übergeordneten Artikel zurückverlinkt. PageRank misst Verlinkungsstruktur, nicht Relevanz im menschlichen Sinne – und genau das macht solche Ausreißer zu wertvollen Datenpunkten.
 
 ## Fazit
 

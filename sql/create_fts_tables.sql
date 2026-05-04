@@ -1,7 +1,3 @@
--- DROP TABLE IF EXISTS internal_texts_vocab;
--- DROP TABLE IF EXISTS internal_texts_fts;
--- DROP TABLE IF EXISTS internal_pages_vocab;
--- DROP TABLE IF EXISTS internal_pages_fts;
 DROP TABLE IF EXISTS internal_texts_vocab_unicode;
 DROP TABLE IF EXISTS internal_texts_fts_unicode;
 DROP TABLE IF EXISTS internal_texts_vocab_trigram;
@@ -15,8 +11,8 @@ CREATE VIRTUAL TABLE internal_texts_fts_unicode USING fts5(
     text,
     content='internal_texts',
     content_rowid='id',
-    -- tokenize='unicode61 remove_diacritics 2'
-    tokenize='porter unicode61 remove_diacritics 2'
+    tokenize='unicode61 remove_diacritics 2'
+    -- tokenize='porter unicode61 remove_diacritics 2'
 );
 
 INSERT INTO internal_texts_fts_unicode(rowid, text)
@@ -47,7 +43,7 @@ END;
 
 CREATE VIRTUAL TABLE internal_texts_vocab_unicode USING fts5vocab(internal_texts_fts_unicode, 'row');
 
-/* CREATE VIRTUAL TABLE internal_texts_fts_trigram USING fts5(
+CREATE VIRTUAL TABLE internal_texts_fts_trigram USING fts5(
     text,
     content='internal_texts',
     content_rowid='id',
@@ -80,14 +76,14 @@ BEGIN
     VALUES (new.id, new.text);
 END;
 
-CREATE VIRTUAL TABLE internal_texts_vocab_trigram USING fts5vocab(internal_texts_fts_trigram, 'row'); */
+CREATE VIRTUAL TABLE internal_texts_vocab_trigram USING fts5vocab(internal_texts_fts_trigram, 'row');
 
 CREATE VIRTUAL TABLE internal_pages_fts_unicode USING fts5(
     title,
     content='internal_pages',
     content_rowid='id',
-    -- tokenize='unicode61 remove_diacritics 2'
-    tokenize='porter unicode61 remove_diacritics 2'
+    tokenize='unicode61 remove_diacritics 2'
+    -- tokenize='porter unicode61 remove_diacritics 2'
 );
 
 INSERT INTO internal_pages_fts_unicode(rowid, title)
@@ -118,7 +114,7 @@ END;
 
 CREATE VIRTUAL TABLE internal_pages_vocab_unicode USING fts5vocab(internal_pages_fts_unicode, 'row');
 
-/* CREATE VIRTUAL TABLE internal_pages_fts_trigram USING fts5(
+CREATE VIRTUAL TABLE internal_pages_fts_trigram USING fts5(
     title,
     content='internal_pages',
     content_rowid='id',
@@ -151,4 +147,4 @@ BEGIN
     VALUES (new.id, new.title, new.text);
 END;
 
-CREATE VIRTUAL TABLE internal_pages_vocab_trigram USING fts5vocab(internal_pages_fts_trigram, 'row'); */
+CREATE VIRTUAL TABLE internal_pages_vocab_trigram USING fts5vocab(internal_pages_fts_trigram, 'row');

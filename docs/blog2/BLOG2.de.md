@@ -1,6 +1,6 @@
 # Wikipedia durchsuchen: BM25, PageRank und die Grenzen von beidem
 
-Eine Suchmaschine zu bauen ist einfach. Eine zu bauen, der man vertrauen kann, ist schwerer. Nach der Berechnung von PageRank über den gesamten Wikipedia-Linkgraphen lag die nächste Frage auf der Hand: Lassen sich diese Ränge nutzen, um Suchergebnisse zu verbessern? Und sobald wir eine Antwort hatten, brauchten wir eine Möglichkeit, sie zu messen.
+Eine Suchmaschine zu bauen ist einfach. Eine zu bauen, der man vertrauen kann, ist schwerer. Nach der Berechnung von PageRank über den gesamten Linkgraphen der englischen Wikipedia lag die nächste Frage auf der Hand: Lassen sich diese Ränge nutzen, um Suchergebnisse zu verbessern? Und sobald wir eine Antwort hatten, brauchten wir eine Möglichkeit, sie zu messen.
 
 Dieser Beitrag beschreibt, wie wir eine Keyword-Suchmaschine auf unserer Wikipedia-Pipeline aufgebaut haben — und was drei Suchanfragen über ihre Stärken und Grenzen verraten.
 
@@ -28,7 +28,7 @@ Das ist ein günstiger, aber wirksamer Ersatz für eine handgepflegte Stoppwortl
 
 ## Der Trigramm-Kompromiss
 
-Wir haben uns für den Trigramm-Tokenizer gegenüber unicode61 entschieden, weil er die Suchqualität messbar verbessert. Trigramm-Indexierung ermöglicht Teilstring-Suche: Eine Anfrage nach „Einstein" findet „Albert Einstein" auch ohne Präfix-Anker. Der Kompromiss ist erheblich — der FTS-Index ist deutlich größer, und sein Aufbau gegen die vollständige englische Wikipedia dauert rund zwei Stunden.
+Wir haben uns für den Trigramm-Tokenizer gegenüber unicode61 entschieden, weil er die Suchqualität messbar verbessert. Trigramm-Indexierung ermöglicht Teilstring-Suche: Eine Anfrage nach "Einstein" findet "Albert Einstein" auch ohne Präfix-Anker. Der Kompromiss ist erheblich — der FTS-Index ist deutlich größer, und sein Aufbau gegen die vollständige englische Wikipedia dauert rund zwei Stunden.
 
 Wer keine Suche benötigt oder einen kleineren Index bevorzugt, kann in `create_fts_tables.sql` auf `unicode61 remove_diacritics 2` umstellen und gewinnt damit schnellere Indexierung auf Kosten der Suchqualität.
 
@@ -36,43 +36,42 @@ Wer keine Suche benötigt oder einen kleineren Index bevorzugt, kann in `create_
 
 Am deutlichsten zeigt sich, was die Suchmaschine tut, wenn man sie einfach laufen lässt. Wir haben drei Anfragen gewählt, die die Ranking-Signale auf unterschiedliche Weise beanspruchen.
 
-### relativity — ein klarer Erfolg
+### newton — ein klarer Erfolg
 
 | Rang | Titel | BM25 | PageRank |
 |------|-------|------|----------|
-| 1 | Theory of relativity | -15,77 | 9,43e-7 |
-| 2 | Relativity Media | -16,03 | 7,93e-7 |
-| 3 | Special relativity | -15,48 | 6,41e-7 |
-| 4 | The Meaning of Relativity | -15,49 | 4,04e-7 |
-| 5 | History of special relativity | -15,90 | 1,48e-7 |
+| 1 | Isaac Newton | -20,69 | 1,37e-5 |
+| 2 | Newton | -25,35 | 2,43e-8 |
+| 3 | Knewton | -24,64 | 5,82e-8 |
+| 4 | Enewton | -24,64 | 4,56e-8 |
+| 5 | Newton-X | -23,96 | 2,87e-8 |
 
-Die Suchmaschine arbeitet hier wie vorgesehen. „Theory of relativity" landet auf Rang 1 mit starken Werten bei beiden Signalen. „Special relativity" und der Geschichtsartikel folgen in plausibler Reihenfolge. „Relativity Media" — ein Medienunternehmen, kein Physikkonzept — erscheint auf Rang 2, weil sein PageRank tatsächlich hoch ist und der Titel exakt passt. Ein Mensch würde ihn weiter hinten einordnen; die Suchmaschine kann die Absicht hinter der Anfrage nicht kennen.
+Isaac Newton landet auf Rang 1 mit dem besten BM25-Wert und einem PageRank, der etwa 200-mal höher liegt als der aller anderen Ergebnisse. Der Rest der Liste ist Trigramm-Rauschen — Artikel, deren Titel den Teilstring "newton" enthalten. Das Ranking bewältigt das hier korrekt, weil der Abstand zwischen Isaac Newton und allem anderen auf beiden Signalen gleichzeitig groß genug ist.
+
+### relativity — ein gemischtes Ergebnis
+
+| Rang | Titel | BM25 | PageRank |
+|------|-------|------|----------|
+| 1 | General relativity | -26,32 | 9,92e-7 |
+| 2 | Relativity Records | -26,32 | 8,41e-7 |
+| 3 | Relativity Media | -26,32 | 7,93e-7 |
+| 4 | Special relativity | -26,32 | 6,41e-7 |
+| 5 | Relativity | -30,72 | 2,43e-8 |
+| 6 | Theory of relativity | -23,17 | 9,43e-7 |
+
+"Theory of relativity" hat den besten BM25-Wert in der Liste (-23,17 gegenüber -26,32 bei den anderen) und einen PageRank, der mit General relativity vergleichbar ist. Trotzdem landet er auf Rang 6. Der Grund: Die vier Spitzenergebnisse erzielen identische BM25-Werte, weil der Trigramm-Tokenizer "relativity" in jedem dieser Titel gleich gut als Teilstring trifft — PageRank allein trennt sie dann. Bei alpha gleich 0,5 reicht ein BM25-Vorsprung nicht immer aus, wenn die BM25-Werte eng beieinanderliegen. Ein Mensch würde "Theory of relativity" auf Platz 1 setzen; die Suchmaschine kann die Absicht hinter der Anfrage nicht erschließen.
 
 ### mercury — ein leises Versagen
 
 | Rang | Titel | BM25 | PageRank |
 |------|-------|------|----------|
-| 1 | Mercury Marquis | -12,63 | 1,58e-7 |
-| 2 | Mercury-Atlas | -12,66 | 1,56e-7 |
-| 3 | Mercury Monterey | -12,61 | 1,44e-7 |
-| 4 | Mercury 7 | -12,71 | 1,42e-7 |
-| 5 | List of Mercury-crossing minor planets | -12,59 | 1,16e-7 |
+| 1 | Mercury Records | -22,37 | 1,23e-5 |
+| 2 | Mercury | -26,86 | 2,43e-8 |
+| 3 | Mercury4 | -26,12 | 4,15e-8 |
+| 4 | Mercury (planet) | -22,37 | 6,39e-6 |
+| 5 | Mercury-P | -25,42 | 2,78e-8 |
 
-Der Planet Merkur, das chemische Element, die römische Gottheit — keiner von ihnen taucht auf. Die Top-10-Ergebnisse werden von Ford/Mercury-Automodellen und verwandten Artikeln dominiert. Das liegt daran, dass Wikipedia Hunderte von Stub-Artikeln über Mercury-Fahrzeuge enthält, die allesamt den Suchbegriff treffen und durch gegenseitige Verlinkung innerhalb des Clusters einen moderaten, aber konsistenten PageRank aufbauen. Kein einzelner Artikel dominiert — der Cluster tut es. Das ist ein strukturelles Artefakt, kein Relevanzsignal. Die Suchmaschine kann beides nicht unterscheiden.
-
-### newton — ein deutliches Versagen
-
-| Rang | Titel | BM25 | PageRank |
-|------|-------|------|----------|
-| 1 | National Register of Historic Places listings in Newton, Massachusetts | -12,80 | 1,11e-6 |
-| 2 | West Newton, Massachusetts | -12,64 | 4,60e-7 |
-| 3 | Newton Upper Falls | -12,58 | 1,07e-7 |
-| 4 | Newton-by-the-Sea | -12,60 | 7,10e-8 |
-| 5 | Religious views of Isaac Newton | -12,60 | 4,67e-8 |
-
-Isaac Newton erscheint nicht. Das erste Ergebnis — ein Eintrag des National Register of Historic Places für eine Stadt in Massachusetts — landet ganz oben, weil Tausende von NRHP-Listenartikeln auf ihn verweisen und seinen PageRank weit über das hinaus aufblähen, was sein Inhalt für diese Anfrage rechtfertigen würde. Die BM25-Werte der Spitzenergebnisse sind nahezu identisch (alle um -12,6 bis -12,8), also entscheidet PageRank — und entscheidet falsch.
-
-Das ist die deutlichste Illustration dessen, was PageRank tatsächlich misst: Linkstruktur, nicht Wichtigkeit im menschlichen Sinne. „National Register of Historic Places listings in Newton, Massachusetts" ist gut vernetzt innerhalb eines großen, dicht verlinkten Artikelclusters. Auch der Artikel über Isaac Newton ist gut vernetzt — er heißt aber *Isaac Newton*, nicht *Newton*, trifft die Trigramm-Anfrage daher schwächer, und PageRank kann nicht kompensieren, was BM25 verfehlt.
+Der Planet, das chemische Element, die römische Gottheit — keiner in den Top 5. Mercury Records belegt Rang 1, weil es bei BM25 gleichauf mit Mercury (planet) liegt, aber einen etwa doppelt so hohen PageRank aufweist. Ein Plattenlabel schlägt einen Planeten, weil es im Linkgraphen besser vernetzt ist — nicht weil es der wahrscheinlichere Referent für eine einsilbige Suchanfrage wäre. Die Begriffsklärungsseite auf Rang 2 mit schwachen Werten auf beiden Signalen ist dabei das ungünstigste denkbare Ergebnis: Sie ist nie die richtige Antwort und versperrt dem Planeten den Weg nach oben. Das ist dasselbe strukturelle Problem wie zuvor — Linkdichte als Ersatz für Relevanz — nur mit einem anderen Übeltäter als dem Ford/Mercury-Automodell-Cluster.
 
 ## Bewertung mit nDCG
 
@@ -84,24 +83,26 @@ Wir haben die SemSearch_ES-Teilmenge von DBpedia-Entity v2 verwendet — einen k
 DCG@k = Σ rel_i / log2(i + 1)
 ```
 
-Division durch das ideale DCG ergibt nDCG, einen Wert zwischen 0 und 1. Auf der vollständigen englischen Wikipedia erreicht die Suchmaschine einen mittleren nDCG@10 von **0,37**.
+Division durch das ideale DCG ergibt nDCG, einen Wert zwischen 0 und 1. Auf der vollständigen englischen Wikipedia erreicht die Suchmaschine einen mittleren nDCG@10 von **0,455**.
 
-Diese Zahl ist ehrlich einzuordnen. Sie ist kein Misserfolg — 0,37 auf einem Benchmark, der für semantische Retrieval-Systeme entwickelt wurde, allein mit Keyword-Matching und Linkstruktur, ist ein respektables Ergebnis. Aber die Anfragen newton und mercury zeigen genau, wo die verbleibenden 0,63 bleiben: Disambiguierungsfehler, Cluster-Inflation und die grundlegende Lücke zwischen struktureller Wichtigkeit und thematischer Relevanz.
+Zur Einordnung: Das DBpedia-Entity v2 Leaderboard (verfügbar unter [iai-group.github.io/DBpedia-Entity](https://iai-group.github.io/DBpedia-Entity/)) enthält eine Reihe von Retrieval-Modellen, die auf demselben Benchmark bewertet wurden. Reines BM25 erzielt 0,2497 auf SemSearch_ES. Die stärkeren Modelle — Sprachmodell-Varianten mit Entity Linking und feldgewichteter Bewertung — erreichen Werte zwischen 0,62 und 0,65. Unser Ergebnis liegt deutlich über der BM25-Baseline und unterhalb der ausgereiften Retrieval-Modelle — genau dort, wo man ein System erwartet, das ausschließlich Keyword-Matching und Linkstruktur kombiniert, ohne Trainingsdaten und ohne semantisches Verständnis.
+
+Die Anfragen newton und mercury zeigen präzise, wo die verbleibende Lücke liegt: Disambiguierungsfehler und der grundlegende Unterschied zwischen struktureller Vernetzung und thematischer Relevanz.
 
 ## Was helfen würde
 
-Beide Versagensmuster weisen in dieselbe Richtung. Mercury und newton sind mehrdeutige Begriffe, deren „richtige" Interpretation von einer Anfrageabsicht abhängt, die Keyword-Matching nicht erschließen kann. Die strukturellen Lösungsansätze sind bekannt:
+Beide Versagensmuster weisen in dieselbe Richtung. Mercury und relativity sind Anfragen, deren "richtige" Interpretation von einer Absicht abhängt, die Keyword-Matching nicht erschließen kann. Die strukturellen Lösungsansätze sind bekannt:
 
-**Query Expansion und Entity Linking** würden bei mercury und newton helfen, indem die prominenteste benannte Entität für jeden Begriff identifiziert und direkt aufgewertet wird. **Semantische Embeddings** würden helfen, indem Anfrageabsicht statt Oberflächenbegriffe kodiert werden — ein Dense-Retrieval-Modell würde Isaac Newton unabhängig von BM25-Werten weit vor einer Stadt in Massachusetts platzieren. Beide Ansätze erhöhen Komplexität und Latenz; keiner ist ein direkter Ersatz für die bestehende Architektur.
+**Query Expansion und Entity Linking** würden bei mercury helfen, indem die prominenteste benannte Entität identifiziert und direkt aufgewertet wird — genau das implementieren die ELR-Varianten im Leaderboard, und ihre Verbesserungen gegenüber den Basismodellen sind konsistent. **Semantische Embeddings** würden helfen, indem Anfrageabsicht statt Oberflächenbegriffe kodiert werden — ein Dense-Retrieval-Modell würde Mercury (planet) unabhängig vom PageRank vor einem Plattenlabel platzieren. Beide Ansätze erhöhen Komplexität und Latenz; keiner ist ein direkter Ersatz für die bestehende Architektur.
 
-Die Stärken des aktuellen Systems — Geschwindigkeit, Nachvollziehbarkeit, kein GPU-Bedarf — sind real. Für eindeutige Entitätsanfragen funktioniert es gut. Für einsilbige Substantive mit vielen gültigen Referenten nicht — und ein zweites Signal behebt nicht, was im Kern ein Disambiguierungsproblem ist.
+Die Stärken des aktuellen Systems — Geschwindigkeit, Nachvollziehbarkeit, kein GPU-Bedarf — sind real. Für eindeutige Entitätsanfragen wie newton funktioniert es gut. Für einsilbige Substantive mit vielen gültigen Referenten nicht — und ein zweites Signal behebt nicht, was im Kern ein Disambiguierungsproblem ist.
 
 ## Fazit
 
-Die Suchmaschine zu bauen war unkompliziert. Das Schwierigere war, ein Evaluierungs-Harness zu bauen, dem man vertrauen kann — und dann bereit zu sein, Anfragen zu stellen, die die Lücken sichtbar machen. nDCG@10 von 0,37 auf der vollständigen englischen Wikipedia hat uns eine Zahl gegeben; mercury und newton haben uns ein Verständnis davon gegeben, was diese Zahl bedeutet.
+Die Suchmaschine zu bauen war unkompliziert. Das Schwierigere war, ein Evaluierungs-Harness zu bauen, dem man vertrauen kann — und dann bereit zu sein, Anfragen zu stellen, die die Lücken sichtbar machen. nDCG@10 von 0,455 auf der vollständigen englischen Wikipedia hat uns eine Zahl gegeben; mercury und relativity haben uns ein Verständnis davon gegeben, was diese Zahl bedeutet.
 
 Das Nützlichste, was ein Benchmark tun kann, ist präzise aufzuzeigen, was nicht funktioniert. Unserer tut es.
 
----
+—-
 
 *Der vollständige Code, einschließlich des Evaluierungs-Harness, ist Open Source: [github.com/idesis-gmbh/wikiexperiments](https://github.com/idesis-gmbh/wikiexperiments)*

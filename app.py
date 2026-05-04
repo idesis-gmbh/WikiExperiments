@@ -1,3 +1,5 @@
+from time import time
+
 from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.templating import Jinja2Templates
@@ -20,39 +22,17 @@ def base_context(**kwargs):
 
 async def search(request):
     query = request.query_params.get("query", "")
-    _, _, results = search_query(query) if query else (None, None, [])
+    start = time()
+    results = search_query(query) if query else []
+    for result in results:
+        tokens = result["text"].split()
+        result["text"] = " ".join(tokens[:64]) + (" ..." if len(tokens) > 64 else "")
+    end = time()
+    print(f"Searched: {end - start:.2f} seconds")
     return templates.TemplateResponse(
         request=request,
         name="search.html",
         context=base_context(query=query, results=results),
-    )
-
-
-async def pagerank(request):
-    ns = int(request.query_params.get("ns", 0))
-    pages = top_pages_by_pagerank(ns)
-    return templates.TemplateResponse(
-        request=request,
-        name="pagerank.html",
-        context=base_context(pages=pages, ns=ns),
-    )
-
-
-async def redirects(request):
-    stats = redirect_statistics()
-    return templates.TemplateResponse(
-        request=request,
-        name="redirects.html",
-        context=base_context(stats=stats),
-    )
-
-
-async def degrees(request):
-    distribution = degree_distribution()
-    return templates.TemplateResponse(
-        request=request,
-        name="degrees.html",
-        context=base_context(distribution=distribution),
     )
 
 
@@ -67,13 +47,41 @@ async def path(request):
     )
 
 
+async def degrees(request):
+    distribution = degree_distribution()
+    return templates.TemplateResponse(
+        request=request,
+        name="degrees.html",
+        context=base_context(distribution=distribution),
+    )
+
+
+async def redirects(request):
+    stats = redirect_statistics()
+    return templates.TemplateResponse(
+        request=request,
+        name="redirects.html",
+        context=base_context(stats=stats),
+    )
+
+
+async def pagerank(request):
+    ns = int(request.query_params.get("ns", 0))
+    pages = top_pages_by_pagerank(ns)
+    return templates.TemplateResponse(
+        request=request,
+        name="pagerank.html",
+        context=base_context(pages=pages, ns=ns),
+    )
+
+
 app = Starlette(
     debug=True,
     routes=[
         Route("/", search),
-        Route("/pagerank", pagerank),
-        Route("/redirects", redirects),
-        Route("/degrees", degrees),
         Route("/path", path),
+        Route("/degrees", degrees),
+        Route("/redirects", redirects),
+        Route("/pagerank", pagerank),
     ],
 )
