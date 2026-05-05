@@ -24,6 +24,7 @@ CREATE TABLE internal_pages (
     out_degree INTEGER,
     rank1 REAL,
     rank2 REAL,
+    authority REAL, 
     PRIMARY KEY(id),
     UNIQUE(ns, title),
     FOREIGN KEY(text_id) REFERENCES internal_texts(id)

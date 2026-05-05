@@ -163,6 +163,9 @@ def init_schema(oltp_db_file_name=OLTP_DB_FILE_NAME):
         cursor.execute("""
             CREATE OR REPLACE TABLE external_links AS 
             SELECT * FROM sqlite_db.external_links""")
+        cursor.execute("""
+            CREATE OR REPLACE TABLE redirects AS 
+            SELECT * FROM sqlite_db.redirects""")
         cursor.execute("DETACH sqlite_db")
         connection.commit()
 
@@ -179,8 +182,13 @@ def transfer_results(oltp_db_file_name=OLTP_DB_FILE_NAME):
     with duckdb_connect() as connection:
         cursor = connection.cursor()
         cursor.execute(f"""
+            UPDATE internal_pages
+            SET authority = pa.total_citing_pagerank
+            FROM internal_page_authority pa
+            WHERE id = pa.page_id""")
+        cursor.execute(f"""
             COPY (
-                SELECT p.id, p.rank1, p.rank2
+                SELECT p.id, p.rank1, p.rank2, p.authority
                 FROM internal_pages p
             ) TO '{csv_file}' (FORMAT CSV, HEADER true)""")
         connection.commit()
@@ -188,13 +196,14 @@ def transfer_results(oltp_db_file_name=OLTP_DB_FILE_NAME):
         cursor = connection.cursor()
         cursor.execute("""
             CREATE TEMP TABLE ranks_temporary 
-            (id INTEGER, rank1 REAL NULL, rank2 REAL NULL)""")
+            (id INTEGER, rank1 REAL NULL, rank2 REAL NULL, authority REAL NULL)""")
         rows = iter(csv.reader(open(csv_file)))
         next(rows)
-        cursor.executemany("INSERT INTO ranks_temporary VALUES (?, ?, ?)", rows)
+        cursor.executemany("INSERT INTO ranks_temporary VALUES (?, ?, ?, ?)", rows)
         cursor.execute("""
             UPDATE internal_pages 
-            SET rank1 = temporary.rank1, rank2 = temporary.rank2
+            SET rank1 = temporary.rank1, rank2 = temporary.rank2, 
+                authority = CASE WHEN temporary.authority <> '' THEN temporary.authority ELSE NULL END
             FROM ranks_temporary temporary
             WHERE internal_pages.id = temporary.id""")
         connection.commit()

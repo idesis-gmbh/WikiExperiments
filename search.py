@@ -75,7 +75,8 @@ def search_query_in_title(
             """
             WITH title_candidates_unicode AS (
                 SELECT p.id, p.ns, p.title, pt.text,
-                    ? * bm25(internal_pages_fts_unicode) AS bm25, p.rank1 AS rank1
+                    ? * bm25(internal_pages_fts_unicode) AS bm25, 
+                    p.rank1 AS rank1, p.authority as authority
                 FROM internal_pages p
                 INNER JOIN internal_pages_fts_unicode pfts ON pfts.rowid = p.id
                 INNER JOIN internal_texts pt ON pt.id = p.text_id
@@ -85,7 +86,8 @@ def search_query_in_title(
             ),
             title_candidates_trigram AS (
                 SELECT p.id, p.ns, p.title, pt.text,
-                    ? * bm25(internal_pages_fts_trigram) AS bm25, p.rank1 AS rank1
+                    ? * bm25(internal_pages_fts_trigram) AS bm25, 
+                    p.rank1 AS rank1, p.authority as authority
                 FROM internal_pages p
                 INNER JOIN internal_pages_fts_trigram pfts ON pfts.rowid = p.id
                 INNER JOIN internal_texts pt ON pt.id = p.text_id
@@ -94,10 +96,10 @@ def search_query_in_title(
                 LIMIT ?
             ),                
             candidates AS (
-                SELECT id, ns, title, text, bm25, rank1
+                SELECT id, ns, title, text, bm25, rank1, authority
                 FROM title_candidates_unicode
                 UNION ALL
-                SELECT id, ns, title, text, bm25, rank1
+                SELECT id, ns, title, text, bm25, rank1, authority
                 FROM title_candidates_trigram
             ),
             extrema AS (
@@ -142,7 +144,8 @@ def search_query_in_title_and_text(
             """
             WITH title_candidates_unicode AS (
                 SELECT p.id, p.ns, p.title, pt.text,
-                    ? * bm25(internal_pages_fts_unicode) AS bm25, p.rank1 AS rank1
+                    ? * bm25(internal_pages_fts_unicode) AS bm25, 
+                    p.rank1 AS rank1, p.authority as authority
                 FROM internal_pages p
                 INNER JOIN internal_pages_fts_unicode pfts ON pfts.rowid = p.id
                 INNER JOIN internal_texts pt ON pt.id = p.text_id
@@ -152,7 +155,8 @@ def search_query_in_title_and_text(
             ),
             title_candidates_trigram AS (
                 SELECT p.id, p.ns, p.title, pt.text,
-                    ? * bm25(internal_pages_fts_trigram) AS bm25, p.rank1 AS rank1
+                    ? * bm25(internal_pages_fts_trigram) AS bm25, 
+                    p.rank1 AS rank1, p.authority as authority
                 FROM internal_pages p
                 INNER JOIN internal_pages_fts_trigram pfts ON pfts.rowid = p.id
                 INNER JOIN internal_texts pt ON pt.id = p.text_id
@@ -162,7 +166,8 @@ def search_query_in_title_and_text(
             ),                
             text_candidates_unicode AS (
                 SELECT p.id, p.ns, p.title, pt.text,
-                    ? * bm25(internal_texts_fts_unicode) AS bm25, p.rank1 AS rank1 
+                    ? * bm25(internal_texts_fts_unicode) AS bm25, 
+                    p.rank1 AS rank1, p.authority as authority 
                 FROM internal_pages p
                 INNER JOIN internal_texts pt ON pt.id = p.text_id
                 INNER JOIN internal_texts_fts_unicode ptfts ON ptfts.rowid = pt.id
@@ -172,7 +177,8 @@ def search_query_in_title_and_text(
             ),
             text_candidates_trigram AS (
                 SELECT p.id, p.ns, p.title, pt.text,
-                    ? * bm25(internal_texts_fts_trigram) AS bm25, p.rank1 AS rank1 
+                    ? * bm25(internal_texts_fts_trigram) AS bm25, 
+                    p.rank1 AS rank1, p.authority as authority 
                 FROM internal_pages p
                 INNER JOIN internal_texts pt ON pt.id = p.text_id
                 INNER JOIN internal_texts_fts_trigram ptfts ON ptfts.rowid = pt.id
@@ -181,16 +187,16 @@ def search_query_in_title_and_text(
                 LIMIT ?
             ),
             candidates AS (
-                SELECT id, ns, title, text, bm25, rank1
+                SELECT id, ns, title, text, bm25, rank1, authority
                 FROM title_candidates_unicode
                 UNION ALL
-                SELECT id, ns, title, text, bm25, rank1
+                SELECT id, ns, title, text, bm25, rank1, authority
                 FROM title_candidates_trigram
                 UNION ALL
-                SELECT id, ns, title, text, bm25, rank1
+                SELECT id, ns, title, text, bm25, rank1, authority
                 FROM text_candidates_unicode
                 UNION ALL
-                SELECT id, ns, title, text, bm25, rank1
+                SELECT id, ns, title, text, bm25, rank1, authority
                 FROM text_candidates_trigram
             ),
             extrema AS (
@@ -252,8 +258,7 @@ def search_query(
         )
     lookup = set()
     pages = []
-    # for page_id, ns, title, text, bm25, rank, redirect in raw_pages:
-    for page_id, ns, title, text, bm25, rank in raw_pages:
+    for page_id, ns, title, text, bm25, rank, authority in raw_pages:
         if page_id not in lookup:
             lookup.add(page_id)
             pages.append(
@@ -264,7 +269,7 @@ def search_query(
                     "text": text,
                     "bm25": bm25,
                     "rank": rank,
-                    # "redirect": redirect,
+                    "authority": authority,
                 }
             )
     return pages[:k2]

@@ -15,6 +15,12 @@ CREATE TABLE external_domain_authority AS
     JOIN external_pages ep ON el.target_id = ep.id
     JOIN external_domains ed ON ep.domain_id = ed.id
     WHERE ip.ns = 0
+    AND ed.name NOT IN (
+        'archive.org',
+        'archive.today',
+        'ghostarchive.org',
+        'web.archive.org'
+    )
     GROUP BY ALL;
 
 CREATE TABLE tld_authority AS

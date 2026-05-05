@@ -56,8 +56,7 @@ def shortest_path(source_title, target_title):
 
 
 def redirect_statistics():
-    # TODO: compare with DuckDB
-    with sqlite_connect() as connection:
+    with duckdb_connect() as connection:
         total = connection.execute("SELECT COUNT(*) FROM internal_pages").fetchone()[0]
         content_and_redirects = connection.execute(
             "SELECT COUNT(*) FROM internal_pages WHERE ns = 0"
@@ -194,11 +193,11 @@ def tld_authority(min_citing_pages=1000):
 if __name__ == "__main__":
     from pprint import pprint
 
-    # pprint(shortest_path("Mathematics", "Adolf Hitler"))
-    # pprint(degree_distribution())
-    # pprint(redirect_statistics())
-    # pprint(top_pages_by_pagerank(0))
-    # pprint(top_pages_by_pagerank(14))
-    # pprint(domain_authority())
-    # pprint(page_source_profile("Mathematics"))
-    # pprint(tld_authority())
+    pprint(shortest_path("Mathematics", "Adolf Hitler"))
+    pprint(degree_distribution())
+    pprint(redirect_statistics())
+    pprint(top_pages_by_pagerank(0))
+    pprint(top_pages_by_pagerank(14))
+    pprint(domain_authority())
+    pprint(page_source_profile("Mathematics"))
+    pprint(tld_authority())
