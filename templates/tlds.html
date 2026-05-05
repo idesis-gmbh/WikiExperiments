@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}TLD Distribution · Wiki Search{% endblock %}
+
+{% block content %}
+<h2>TLD Distribution</h2>
+
+<form method="get">
+  <input name="min_citing_pages" type="number" value="{{ min_citing_pages }}" min="1" style="width:6rem" title="Minimum citing pages">
+  <button type="submit">Filter</button>
+</form>
+
+<table id="tlds-table">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>TLD</th>
+      <th class="num sortable">Domains ↕</th>
+      <th class="num sortable">Citing pages ↕</th>
+      <th class="num sortable">Authority ↕</th>
+      <th class="num sortable">Avg rank ↕</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for t in tlds %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td>{{ t.tld if t.tld else '(none)' }}</td>
+      <td class="num">{{ "{:,}".format(t.domains) }}</td>
+      <td class="num">{{ "{:,}".format(t.citing_pages) }}</td>
+      <td class="num" title="{{ t.total_citing_pagerank }}">{{ "%.2e"|format(t.total_citing_pagerank) }}</td>
+      <td class="num" title="{{ t.avg_citing_pagerank }}">{{ "%.2e"|format(t.avg_citing_pagerank) }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<script>
+  document.querySelectorAll("th.sortable").forEach(th => {
+    th.style.cursor = "pointer";
+    th.addEventListener("click", () => {
+      const tbody = document.querySelector("#tlds-table tbody");
+      const rows  = Array.from(tbody.querySelectorAll("tr"));
+      const asc   = th.dataset.asc === "true";
+      rows.sort((a, b) => {
+        const va = parseFloat(a.children[th.cellIndex].title || a.children[th.cellIndex].textContent.replace(/,/g, ""));
+        const vb = parseFloat(b.children[th.cellIndex].title || b.children[th.cellIndex].textContent.replace(/,/g, ""));
+        return asc ? va - vb : vb - va;
+      });
+      th.dataset.asc = !asc;
+      rows.forEach((r, i) => { r.children[0].textContent = i + 1; tbody.appendChild(r); });
+    });
+  });
+</script>
+{% endblock %}

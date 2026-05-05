@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}Domain Authority · Wiki Search{% endblock %}
+
+{% block content %}
+<h2>External Domain Authority</h2>
+<form method="get">
+  <input name="min_links" type="number" value="{{ min_links }}" min="1" style="width:6rem" title="Minimum citing pages">
+  <input name="limit"     type="number" value="{{ limit }}"     min="1" max="1000" style="width:6rem" title="Limit">
+  <button type="submit">Show</button>
+</form>
+
+<table id="sources-table">
+  <thead>
+    <tr>
+      <th>#</th>
+      <th data-col="domain">Domain</th>
+      <th data-col="tld">TLD</th>
+      <th data-col="citing_pages"     class="num sortable" title="Distinct Wikipedia articles citing this domain">Citing pages ↕</th>
+      <th data-col="total_pagerank"   class="num sortable" title="Sum of PageRank of all citing articles — primary authority signal">Authority ↕</th>
+      <th data-col="avg_pagerank"     class="num sortable" title="Average PageRank of citing articles — quality over quantity">Avg rank ↕</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for d in domains %}
+    <tr>
+      <td>{{ loop.index }}</td>
+      <td><a href="https://{{ d.domain }}" rel="noopener noreferrer">{{ d.domain }}</a></td>
+      <td>{{ d.tld }}</td>
+      <td class="num">{{ "{:,}".format(d.citing_pages) }}</td>
+      <td class="num">{{ "%.2e"|format(d.total_citing_pagerank) }}</td>
+      <td class="num">{{ "%.2e"|format(d.avg_citing_pagerank) }}</td>    
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<script>
+  document.querySelectorAll("th.sortable").forEach(th => {
+    th.style.cursor = "pointer";
+    th.addEventListener("click", () => {
+      const col   = th.dataset.col;
+      const tbody = document.querySelector("#sources-table tbody");
+      const rows  = Array.from(tbody.querySelectorAll("tr"));
+      const asc   = th.dataset.asc === "true";
+      rows.sort((a, b) => {
+        const va = parseFloat(a.children[th.cellIndex].textContent);
+        const vb = parseFloat(b.children[th.cellIndex].textContent);
+        return asc ? va - vb : vb - va;
+      });
+      th.dataset.asc = !asc;
+      rows.forEach((r, i) => { r.children[0].textContent = i + 1; tbody.appendChild(r); });
+    });
+  });
+</script>
+{% endblock %}

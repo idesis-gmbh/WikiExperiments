@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block title %}Page Sources · Wiki Search{% endblock %}
+
+{% block content %}
+<h2>Page Sources{% if title %}: {{ title }}{% endif %}</h2>
+
+<form method="get">
+  <input name="title" type="text" value="{{ title }}" placeholder="Article title" style="width:20rem">
+  <input name="min_citations" type="number" value="{{ min_citations }}" min="1" style="width:4rem" title="Minimum citations">
+  <button type="submit">Show</button>
+</form>
+
+{% if title and not profile %}
+  <p>No sources found for <em>{{ title }}</em>.</p>
+{% elif profile %}
+<table>
+  <thead>
+    <tr><th>Domain</th><th>TLD</th><th class="num">Citations</th><th>URLs</th></tr>
+  </thead>
+  <tbody>
+    {% set ns = namespace(current_domain=None, count=0) %}
+    {% for s in profile %}
+    {% if s.domain != ns.current_domain %}
+      {% set ns.current_domain = s.domain %}
+      <tr>
+        <td><a href="https://{{ s.domain }}" rel="noopener noreferrer">{{ s.domain }}</a></td>
+        <td>{{ s.tld }}</td>
+        <td class="num">{{ s.domain_citation_count }}</td>
+        <td><a href="{{ s.url }}" rel="noopener noreferrer">{{ s.url[:80] }}{% if s.url|length > 80 %}…{% endif %}</a></td>
+      </tr>
+    {% else %}
+      <tr>
+        <td></td><td></td><td></td>
+        <td><a href="{{ s.url }}" rel="noopener noreferrer">{{ s.url[:80] }}{% if s.url|length > 80 %}…{% endif %}</a></td>
+      </tr>
+    {% endif %}
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

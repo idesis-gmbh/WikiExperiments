@@ -29,8 +29,6 @@ flowchart TD
     B --> C[(wiki-oltp.db\nSQLite)]
     A --> D[ETL pass 2\nlinks + redirects]
     D --> C
-    C --> E[Post-process\nredirect text]
-    E --> C
     C --> F[FTS index build\ntrigram tokenizer]
     F --> C
     C --> G[OLAP transfer]
@@ -42,7 +40,7 @@ flowchart TD
     C --> L[search.py\nBM25 × PageRank]
 ```
 
-**1. ETL (`etl.py`)** — Parses a Wikipedia multistream dump in two passes. The index file locates compressed blocks in the data file, which are decompressed and parsed as XML using `mwparserfromhell`. Pass 1 loads all pages into SQLite, storing lead paragraph text in a separate `internal_texts` table deduplicated by hash. Pass 2 loads internal links, external links, and redirects. Both passes run in parallel using `ProcessPoolExecutor`. A post-processing step propagates lead text from redirect targets back to redirect source pages, ensuring redirect pages are searchable. Finally, `update_schema()` builds two FTS5 virtual tables: `internal_texts_fts` over lead text content, and `internal_pages_fts` over page titles.
+**1. ETL (`etl.py`)** — Parses a Wikipedia multistream dump in two passes. The index file locates compressed blocks in the data file, which are decompressed and parsed as XML using `mwparserfromhell`. Pass 1 loads all pages into SQLite, storing lead paragraph text in a separate `internal_texts` table deduplicated by hash. Pass 2 loads internal links, external links, and redirects. Both passes run in parallel using `ProcessPoolExecutor`. Finally, `update_schema()` builds two FTS5 virtual tables: `internal_texts_fts` over lead text content, and `internal_pages_fts` over page titles.
 
 **2. PageRank (`pr.py`, `pr_nx.py`)** — `pr.py` copies the SQLite tables into DuckDB for analytical processing, then computes PageRank iteratively in SQL across both article pages (NS 0) and category pages (NS 14). A ping-pong buffer alternates between two rank columns (`rank1`, `rank2`) to ensure all source ranks within a single iteration are consistent. Results are written back to SQLite. For comparison, PageRank can also be run directly against the SQLite database. `pr_nx.py` provides a NetworkX alternative that loads the full graph into memory — competitive with DuckDB on smaller corpora but unsuitable for full English Wikipedia on typical hardware due to memory constraints.
 
@@ -105,7 +103,6 @@ One of the goals of this project is to compare different execution engines for a
 |-------|------|
 | ETL pass 1 (pages + lead text) | ~210s |
 | ETL pass 2 (links) | ~420s |
-| Post-process (redirects) | ~3s |
 | FTS index build | ~210s |
 | PageRank — NetworkX (28 iterations) | ~24s |
 | PageRank — DuckDB (28 iterations) | ~24s |
@@ -129,7 +126,6 @@ The key difference between NetworkX and DuckDB becomes apparent at scale: Networ
 |-------|------|
 | ETL pass 1 (pages + lead text) | ~4 hrs |
 | ETL pass 2 (links) | ~7 hrs |
-| Post-process (redirects) | ~10 min |
 | FTS index build | ~2 hrs |
 | PageRank — DuckDB | ~31 min |
 | PageRank — NetworkX | exceeds RAM |
@@ -211,10 +207,9 @@ This will:
 1. Initialize the SQLite schema (skipped if database already exists)
 2. ETL pass 1 — parse and load pages and lead text into SQLite
 3. ETL pass 2 — parse and load links and redirects into SQLite
-4. Post-process — propagate lead text through redirect chains
-5. Build FTS index — create `internal_pages_fts` (titles) and `internal_texts_fts` (lead text) virtual tables
-6. Transfer to DuckDB and compute PageRank
-7. Transfer PageRank results back to SQLite
+4. Build FTS index — create `internal_pages_fts` (titles) and `internal_texts_fts` (lead text) virtual tables
+5. Transfer to DuckDB and compute PageRank
+6. Transfer PageRank results back to SQLite
 
 Or run each stage individually:
 

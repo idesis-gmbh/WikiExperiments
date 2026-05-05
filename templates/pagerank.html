@@ -9,6 +9,7 @@
     <option value="0" {% if ns == 0 %}selected{% endif %}>Articles</option>
     <option value="14" {% if ns == 14 %}selected{% endif %}>Categories</option>
   </select>
+  <input name="limit" type="number" value="{{ limit }}" min="1" max="1000" style="width:6rem">
   <button type="submit">Show</button>
 </form>
 

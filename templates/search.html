@@ -17,7 +17,7 @@
       <br>
       <small>{{ r.text }}</small>
       <br>
-      <small style="color: #999;">bm25 {{ "%.2f"|format(r.bm25) }} · rank {{ "%.2e"|format(r.rank) }}</small>
+      <small style="color: #999;">bm25 {{ "%.2f"|format(r.bm25) }} · rank {{ "%.2e"|format(r.rank) }} · <a href="/page-sources?title={{ r.title | replace(' ', '+') }}">sources</a></small>
     </li>
     {% endfor %}
   </ul>

@@ -103,8 +103,8 @@ def degree_distribution():
         return result
 
 
-def top_pages_by_pagerank(ns, n=20):
-    with sqlite_connect() as connection:
+def top_pages_by_pagerank(ns, limit=100):
+    with duckdb_connect() as connection:
         rows = connection.execute(
             """
             SELECT title, rank1
@@ -113,7 +113,7 @@ def top_pages_by_pagerank(ns, n=20):
             ORDER BY rank1 DESC
             LIMIT ?
             """,
-            (ns, n),
+            (ns, limit),
         ).fetchall()
         return [
             {"rank": i, "title": title, "score": score}
@@ -121,11 +121,113 @@ def top_pages_by_pagerank(ns, n=20):
         ]
 
 
+def domain_link_stats(min_links=10, limit=100):
+    with duckdb_connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                ed.name AS domain,
+                ed.tld,
+                COUNT(DISTINCT el.source_id) AS citing_pages,
+                AVG(ip.rank1) AS avg_citing_pagerank,
+                SUM(ip.rank1) AS total_citing_pagerank
+            FROM external_links el
+            JOIN external_pages ep ON el.target_id = ep.id
+            JOIN external_domains ed ON ep.domain_id = ed.id
+            JOIN internal_pages ip ON el.source_id = ip.id
+            WHERE ip.ns = 0
+            GROUP BY ALL
+            HAVING COUNT(DISTINCT el.source_id) >= ?
+            ORDER BY total_citing_pagerank DESC
+            LIMIT ?
+        """,
+            (min_links, limit),
+        ).fetchall()
+        return [
+            {
+                "domain": domain,
+                "tld": tld,
+                "citing_pages": citing_pages,
+                "avg_citing_pagerank": avg_citing_pagerank,
+                "total_citing_pagerank": total_citing_pagerank,
+            }
+            for domain, tld, citing_pages, avg_citing_pagerank, total_citing_pagerank in rows
+        ]
+
+
+def page_source_profile(title, min_citations=2):
+    with duckdb_connect() as connection:
+        rows = connection.execute(
+            """
+            WITH profile AS (
+                SELECT
+                    ep.url,
+                    ed.name AS domain,
+                    ed.tld,
+                    COUNT(*) OVER (PARTITION BY ed.id) AS domain_citation_count
+                FROM internal_pages ip
+                JOIN external_links el ON el.source_id = ip.id
+                JOIN external_pages ep ON el.target_id = ep.id
+                JOIN external_domains ed ON ep.domain_id = ed.id
+                WHERE ip.title = ? AND ip.ns = 0
+            )
+            SELECT * FROM profile
+            WHERE domain_citation_count >= ?
+            ORDER BY domain_citation_count DESC, domain        """,
+            (title, min_citations),
+        ).fetchall()
+        return [
+            {
+                "url": url,
+                "domain": domain,
+                "tld": tld,
+                "domain_citation_count": domain_citation_count,
+            }
+            for url, domain, tld, domain_citation_count in rows
+        ]
+
+
+def tld_distribution(min_citing_pages=1000):
+    with duckdb_connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                ed.tld,
+                COUNT(DISTINCT ed.id)           AS domains,
+                COUNT(DISTINCT el.source_id)    AS citing_pages,
+                AVG(ip.rank1)                   AS avg_citing_pagerank,
+                SUM(ip.rank1)                   AS total_citing_pagerank
+            FROM external_links el
+            JOIN external_pages ep ON el.target_id = ep.id
+            JOIN external_domains ed ON ep.domain_id = ed.id
+            JOIN internal_pages ip ON el.source_id = ip.id
+            WHERE ip.ns = 0
+            GROUP BY ALL
+            HAVING COUNT(DISTINCT el.source_id) >= ?
+            ORDER BY total_citing_pagerank DESC
+        """,
+            (min_citing_pages,),
+        ).fetchall()
+        return [
+            {
+                "tld": tld,
+                "domains": domains,
+                "citing_pages": citing_pages,
+                "avg_citing_pagerank": avg_citing_pagerank,
+                "total_citing_pagerank": total_citing_pagerank,
+            }
+            for tld, domains, citing_pages, avg_citing_pagerank, total_citing_pagerank in rows
+        ]
+
+
 if __name__ == "__main__":
     from pprint import pprint
 
-    pprint(shortest_path("Mathematics", "Adolf Hitler"))
-    pprint(degree_distribution())
-    pprint(redirect_statistics())
-    pprint(top_pages_by_pagerank(0))
-    pprint(top_pages_by_pagerank(14))
+    # pprint(shortest_path("Mathematics", "Adolf Hitler"))
+    # pprint(degree_distribution())
+    # pprint(redirect_statistics())
+    # pprint(top_pages_by_pagerank(0))
+    # pprint(top_pages_by_pagerank(14))
+    # pprint(domain_link_stats())
+    # pprint(page_source_profile("Mathematics"))
+    pprint(tld_distribution())

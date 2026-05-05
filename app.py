@@ -11,6 +11,9 @@ from explore import (
     redirect_statistics,
     degree_distribution,
     top_pages_by_pagerank,
+    domain_link_stats,
+    page_source_profile,
+    tld_distribution,
 )
 
 templates = Jinja2Templates(directory="templates")
@@ -67,11 +70,48 @@ async def redirects(request):
 
 async def pagerank(request):
     ns = int(request.query_params.get("ns", 0))
-    pages = top_pages_by_pagerank(ns)
+    limit = int(request.query_params.get("limit", 100))
+    pages = top_pages_by_pagerank(ns, limit)
     return templates.TemplateResponse(
         request=request,
         name="pagerank.html",
-        context=base_context(pages=pages, ns=ns),
+        context=base_context(pages=pages, ns=ns, limit=limit),
+    )
+
+
+async def sources(request):
+    min_links = int(request.query_params.get("min_links", 10))
+    limit = int(request.query_params.get("limit", 100))
+    domains = domain_link_stats(min_links, limit)
+    return templates.TemplateResponse(
+        request=request,
+        name="sources.html",
+        context=base_context(
+            domains=domains,
+            min_links=min_links,
+            limit=limit,
+        ),
+    )
+
+
+async def page_sources(request):
+    title = request.query_params.get("title", "")
+    min_citations = int(request.query_params.get("min_citations", 2))
+    profile = page_source_profile(title, min_citations) if title else []
+    return templates.TemplateResponse(
+        request=request,
+        name="page_sources.html",
+        context=base_context(title=title, min_citations=min_citations, profile=profile),
+    )
+
+
+async def tlds(request):
+    min_citing_pages = int(request.query_params.get("min_citing_pages", 1000))
+    distribution = tld_distribution(min_citing_pages)
+    return templates.TemplateResponse(
+        request=request,
+        name="tlds.html",
+        context=base_context(tlds=distribution, min_citing_pages=min_citing_pages),
     )
 
 
@@ -83,5 +123,8 @@ app = Starlette(
         Route("/degrees", degrees),
         Route("/redirects", redirects),
         Route("/pagerank", pagerank),
+        Route("/sources", sources),
+        Route("/page-sources", page_sources),
+        Route("/tlds", tlds),
     ],
 )
