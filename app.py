@@ -11,9 +11,9 @@ from explore import (
     redirect_statistics,
     degree_distribution,
     top_pages_by_pagerank,
-    domain_link_stats,
+    domain_authority,
     page_source_profile,
-    tld_distribution,
+    tld_authority,
 )
 
 templates = Jinja2Templates(directory="templates")
@@ -80,15 +80,15 @@ async def pagerank(request):
 
 
 async def sources(request):
-    min_links = int(request.query_params.get("min_links", 10))
+    min_citing_pages = int(request.query_params.get("min_citing_pages", 10))
     limit = int(request.query_params.get("limit", 100))
-    domains = domain_link_stats(min_links, limit)
+    domains = domain_authority(min_citing_pages, limit)
     return templates.TemplateResponse(
         request=request,
         name="sources.html",
         context=base_context(
             domains=domains,
-            min_links=min_links,
+            min_citing_pages=min_citing_pages,
             limit=limit,
         ),
     )
@@ -96,7 +96,7 @@ async def sources(request):
 
 async def page_sources(request):
     title = request.query_params.get("title", "")
-    min_citations = int(request.query_params.get("min_citations", 2))
+    min_citations = int(request.query_params.get("min_citations", 1))
     profile = page_source_profile(title, min_citations) if title else []
     return templates.TemplateResponse(
         request=request,
@@ -107,11 +107,11 @@ async def page_sources(request):
 
 async def tlds(request):
     min_citing_pages = int(request.query_params.get("min_citing_pages", 1000))
-    distribution = tld_distribution(min_citing_pages)
+    tlds = tld_authority(min_citing_pages)
     return templates.TemplateResponse(
         request=request,
         name="tlds.html",
-        context=base_context(tlds=distribution, min_citing_pages=min_citing_pages),
+        context=base_context(tlds=tlds, min_citing_pages=min_citing_pages),
     )
 
 

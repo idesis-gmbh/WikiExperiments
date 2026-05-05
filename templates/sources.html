@@ -3,9 +3,9 @@
 {% block title %}Domain Authority · Wiki Search{% endblock %}
 
 {% block content %}
-<h2>External Domain Authority</h2>
+<h2>Domain Authority</h2>
 <form method="get">
-  <input name="min_links" type="number" value="{{ min_links }}" min="1" style="width:6rem" title="Minimum citing pages">
+  <input name="min_citing_pages" type="number" value="{{ min_citing_pages }}" min="1" style="width:6rem" title="Minimum citing pages">
   <input name="limit"     type="number" value="{{ limit }}"     min="1" max="1000" style="width:6rem" title="Limit">
   <button type="submit">Show</button>
 </form>

@@ -56,6 +56,7 @@ def shortest_path(source_title, target_title):
 
 
 def redirect_statistics():
+    # TODO: compare with DuckDB
     with sqlite_connect() as connection:
         total = connection.execute("SELECT COUNT(*) FROM internal_pages").fetchone()[0]
         content_and_redirects = connection.execute(
@@ -121,59 +122,39 @@ def top_pages_by_pagerank(ns, limit=100):
         ]
 
 
-def domain_link_stats(min_links=10, limit=100):
+def domain_authority(min_citing_pages=10, limit=100):
     with duckdb_connect() as connection:
         rows = connection.execute(
             """
-            SELECT
-                ed.name AS domain,
-                ed.tld,
-                COUNT(DISTINCT el.source_id) AS citing_pages,
-                AVG(ip.rank1) AS avg_citing_pagerank,
-                SUM(ip.rank1) AS total_citing_pagerank
-            FROM external_links el
-            JOIN external_pages ep ON el.target_id = ep.id
-            JOIN external_domains ed ON ep.domain_id = ed.id
-            JOIN internal_pages ip ON el.source_id = ip.id
-            WHERE ip.ns = 0
-            GROUP BY ALL
-            HAVING COUNT(DISTINCT el.source_id) >= ?
+            SELECT *
+            FROM external_domain_authority
+            WHERE citing_pages >= ?
             ORDER BY total_citing_pagerank DESC
             LIMIT ?
         """,
-            (min_links, limit),
+            (min_citing_pages, limit),
         ).fetchall()
         return [
             {
-                "domain": domain,
+                "domain": name,
                 "tld": tld,
                 "citing_pages": citing_pages,
                 "avg_citing_pagerank": avg_citing_pagerank,
                 "total_citing_pagerank": total_citing_pagerank,
             }
-            for domain, tld, citing_pages, avg_citing_pagerank, total_citing_pagerank in rows
+            for domain_id, name, tld, citing_pages, avg_citing_pagerank, total_citing_pagerank in rows
         ]
 
 
-def page_source_profile(title, min_citations=2):
+def page_source_profile(title, min_citations=1):
     with duckdb_connect() as connection:
         rows = connection.execute(
             """
-            WITH profile AS (
-                SELECT
-                    ep.url,
-                    ed.name AS domain,
-                    ed.tld,
-                    COUNT(*) OVER (PARTITION BY ed.id) AS domain_citation_count
-                FROM internal_pages ip
-                JOIN external_links el ON el.source_id = ip.id
-                JOIN external_pages ep ON el.target_id = ep.id
-                JOIN external_domains ed ON ep.domain_id = ed.id
-                WHERE ip.title = ? AND ip.ns = 0
-            )
-            SELECT * FROM profile
-            WHERE domain_citation_count >= ?
-            ORDER BY domain_citation_count DESC, domain        """,
+            SELECT * 
+            FROM internal_page_profile
+            WHERE ns = 0 AND title = ? AND domain_citation_count >= ?
+            ORDER BY domain_citation_count DESC, domain
+        """,
             (title, min_citations),
         ).fetchall()
         return [
@@ -183,27 +164,17 @@ def page_source_profile(title, min_citations=2):
                 "tld": tld,
                 "domain_citation_count": domain_citation_count,
             }
-            for url, domain, tld, domain_citation_count in rows
+            for page_id, ns, title, url, domain, tld, domain_citation_count in rows
         ]
 
 
-def tld_distribution(min_citing_pages=1000):
-    with duckdb_connect() as conn:
-        rows = conn.execute(
+def tld_authority(min_citing_pages=1000):
+    with duckdb_connect() as connection:
+        rows = connection.execute(
             """
-            SELECT
-                ed.tld,
-                COUNT(DISTINCT ed.id)           AS domains,
-                COUNT(DISTINCT el.source_id)    AS citing_pages,
-                AVG(ip.rank1)                   AS avg_citing_pagerank,
-                SUM(ip.rank1)                   AS total_citing_pagerank
-            FROM external_links el
-            JOIN external_pages ep ON el.target_id = ep.id
-            JOIN external_domains ed ON ep.domain_id = ed.id
-            JOIN internal_pages ip ON el.source_id = ip.id
-            WHERE ip.ns = 0
-            GROUP BY ALL
-            HAVING COUNT(DISTINCT el.source_id) >= ?
+            SELECT *
+            FROM tld_authority
+            WHERE citing_pages >= ?
             ORDER BY total_citing_pagerank DESC
         """,
             (min_citing_pages,),
@@ -228,6 +199,6 @@ if __name__ == "__main__":
     # pprint(redirect_statistics())
     # pprint(top_pages_by_pagerank(0))
     # pprint(top_pages_by_pagerank(14))
-    # pprint(domain_link_stats())
+    # pprint(domain_authority())
     # pprint(page_source_profile("Mathematics"))
-    pprint(tld_distribution())
+    # pprint(tld_authority())

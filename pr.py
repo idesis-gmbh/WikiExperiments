@@ -143,7 +143,7 @@ def run_page_rank_oltp(nss):
     print(f"Pagerank computed: {end - start:.2f} seconds")
 
 
-def create_olap_db(oltp_db_file_name=OLTP_DB_FILE_NAME):
+def init_schema(oltp_db_file_name=OLTP_DB_FILE_NAME):
     with duckdb_connect() as connection:
         cursor = connection.cursor()
         cursor.execute(f"""
@@ -165,6 +165,13 @@ def create_olap_db(oltp_db_file_name=OLTP_DB_FILE_NAME):
             SELECT * FROM sqlite_db.external_links""")
         cursor.execute("DETACH sqlite_db")
         connection.commit()
+
+
+def update_schema():
+    with duckdb_connect() as connection:
+        for file_name in ["sql/create_olap_tables.sql", "sql/create_olap_views.sql"]:
+            with open(file_name) as file:
+                connection.execute(file.read())
 
 
 def transfer_results(oltp_db_file_name=OLTP_DB_FILE_NAME):
@@ -195,12 +202,19 @@ def transfer_results(oltp_db_file_name=OLTP_DB_FILE_NAME):
 
 def run_page_rank_olap(nss):
     start = time()
-    create_olap_db()
+    init_schema()
+    end = time()
+    print(f"Initialized schema: {end - start:.2f} seconds")
+    start = time()
     with duckdb_connect() as connection:
         for ns in nss:
             page_rank(connection, [ns])
     end = time()
     print(f"Pagerank computed: {end - start:.2f} seconds")
+    start = time()
+    update_schema()
+    end = time()
+    print(f"Updated schema: {end - start:.2f} seconds")
     start = time()
     transfer_results()
     end = time()
